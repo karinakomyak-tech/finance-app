@@ -1,14 +1,9 @@
-import type { NextConfig } from 'next'
-
-const isDev = process.env.NODE_ENV === 'development'
+// next.config.ts
+import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  reactStrictMode: true,
-}
+  // чтобы Next 16 не ругался и не чудил с "root inference"
+  turbopack: {},
+};
 
-const withPWA = require('next-pwa')({
-  dest: 'public',
-  disable: isDev, // в dev не мешает
-})
-
-export default withPWA(nextConfig)
+export default nextConfig;
