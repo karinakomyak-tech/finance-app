@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { supabase } from '../lib/supabase'
 
 type Transaction = {
@@ -104,33 +104,37 @@ function fmtDateTimeRu(iso: string) {
 
 const ui = {
   page: {
-    padding: 20,
+    padding: 16,
+    paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
     fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial',
     maxWidth: 1120,
     margin: '0 auto',
     color: '#f3f3f3',
-  } as React.CSSProperties,
+  } as CSSProperties,
+
   headerRow: {
     display: 'flex',
     justifyContent: 'space-between',
     gap: 12,
     flexWrap: 'wrap',
     alignItems: 'baseline',
-  } as React.CSSProperties,
-  h1: { fontSize: 28, fontWeight: 900, margin: 0 } as React.CSSProperties,
-  sub: { opacity: 0.78, marginTop: 6 } as React.CSSProperties,
+  } as CSSProperties,
+
+  h1: { fontSize: 28, fontWeight: 900, margin: 0 } as CSSProperties,
+  sub: { opacity: 0.78, marginTop: 6 } as CSSProperties,
 
   grid: {
     display: 'grid',
     gap: 12,
     marginTop: 14,
-  } as React.CSSProperties,
+  } as CSSProperties,
 
+  // ✅ фикс "кривизны" на iPhone: уменьшаем min ширину карточек
   cards: {
     display: 'grid',
     gap: 12,
-    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-  } as React.CSSProperties,
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+  } as CSSProperties,
 
   card: {
     border: '1px solid rgba(255,255,255,0.10)',
@@ -138,13 +142,15 @@ const ui = {
     padding: 14,
     background: 'rgba(255,255,255,0.04)',
     backdropFilter: 'blur(6px)',
-  } as React.CSSProperties,
+    minWidth: 0,
+  } as CSSProperties,
 
-  cardTitle: { fontWeight: 900, marginBottom: 10 } as React.CSSProperties,
-  small: { fontSize: 12, opacity: 0.72 } as React.CSSProperties,
+  cardTitle: { fontWeight: 900, marginBottom: 10 } as CSSProperties,
+  small: { fontSize: 12, opacity: 0.72 } as CSSProperties,
 
-  row: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' } as React.CSSProperties,
+  row: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', minWidth: 0 } as CSSProperties,
 
+  // ✅ iOS: fontSize >= 16 чтобы не было авто-зума и "прыжков"
   input: {
     width: '100%',
     padding: '10px 12px',
@@ -154,7 +160,9 @@ const ui = {
     color: '#f3f3f3',
     outline: 'none',
     boxSizing: 'border-box',
-  } as React.CSSProperties,
+    fontSize: 16,
+    lineHeight: '20px',
+  } as CSSProperties,
 
   select: {
     width: '100%',
@@ -165,7 +173,9 @@ const ui = {
     color: '#f3f3f3',
     outline: 'none',
     boxSizing: 'border-box',
-  } as React.CSSProperties,
+    fontSize: 16,
+    lineHeight: '20px',
+  } as CSSProperties,
 
   btn: {
     padding: '10px 12px',
@@ -174,7 +184,8 @@ const ui = {
     background: 'rgba(255,255,255,0.06)',
     color: '#f3f3f3',
     cursor: 'pointer',
-  } as React.CSSProperties,
+    fontSize: 16,
+  } as CSSProperties,
 
   btnPrimary: {
     padding: '10px 12px',
@@ -184,9 +195,10 @@ const ui = {
     color: '#fff',
     cursor: 'pointer',
     fontWeight: 800,
-  } as React.CSSProperties,
+    fontSize: 16,
+  } as CSSProperties,
 
-  divider: { height: 1, background: 'rgba(255,255,255,0.08)', margin: '10px 0' } as React.CSSProperties,
+  divider: { height: 1, background: 'rgba(255,255,255,0.08)', margin: '10px 0' } as CSSProperties,
 
   pill: {
     display: 'inline-flex',
@@ -198,7 +210,8 @@ const ui = {
     background: 'rgba(255,255,255,0.06)',
     fontSize: 12,
     opacity: 0.95,
-  } as React.CSSProperties,
+    minWidth: 0,
+  } as CSSProperties,
 
   progressWrap: {
     width: '100%',
@@ -206,14 +219,14 @@ const ui = {
     borderRadius: 999,
     background: 'rgba(255,255,255,0.10)',
     overflow: 'hidden',
-  } as React.CSSProperties,
+  } as CSSProperties,
 
   progressBar: (pct: number) =>
     ({
       height: '100%',
       width: `${Math.max(0, Math.min(100, pct))}%`,
       background: 'rgba(255,255,255,0.45)',
-    }) as React.CSSProperties,
+    }) as CSSProperties,
 }
 
 export default function Home() {
@@ -575,7 +588,7 @@ export default function Home() {
     await loadSavingsEntries()
   }
 
-  // ✅ НОВОЕ: кнопка “внести сегодня рекомендованную сумму”
+  // ✅ кнопка “внести сегодня рекомендованную сумму”
   async function addRecommendedToday(savePerDayFromToday: number) {
     const todayStr = toDateOnly(new Date())
     const recommended = Math.max(0, Math.round(savePerDayFromToday))
@@ -769,8 +782,8 @@ export default function Home() {
   return (
     <main style={ui.page}>
       <div style={ui.headerRow}>
-        <div>
-          <h1 style={ui.h1}>Финансы ИП — копилка + контроль трат</h1>
+        <div style={{ minWidth: 0 }}>
+          <h1 style={ui.h1}>Финансы Карина — копилка + контроль трат</h1>
           <div style={ui.sub}>
             Сейчас: <b style={{ textTransform: 'capitalize' }}>{headerMonthYear}</b> • Сегодня: <b>{headerToday}</b>
           </div>
@@ -784,7 +797,7 @@ export default function Home() {
       {/* TIPS */}
       <section style={{ ...ui.card, marginTop: 14 }}>
         <div style={{ ...ui.row, alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 320 }}>
+          <div style={{ flex: '2 1 520px', minWidth: 260 }}>
             <div style={{ ...ui.cardTitle, marginBottom: 8 }}>🧠 Рекомендации на месяц (чтобы накопить)</div>
 
             <div style={{ ...ui.row, marginBottom: 8 }}>
@@ -820,7 +833,6 @@ export default function Home() {
                 Чтобы добить план в этом месяце: с сегодняшнего дня по <b>{money(savePerDayFromToday)}</b> в день
               </div>
 
-              {/* ✅ НОВОЕ: кнопка одним кликом */}
               <div style={{ marginTop: 12 }}>
                 <button
                   onClick={() => addRecommendedToday(savePerDayFromToday)}
@@ -836,7 +848,8 @@ export default function Home() {
             </div>
           </div>
 
-          <div style={{ width: 320 }}>
+          {/* ✅ было width: 320 — делаем адаптив */}
+          <div style={{ flex: '1 1 320px', minWidth: 260, maxWidth: 420 }}>
             <div style={{ ...ui.cardTitle, marginBottom: 8 }}>План дохода на месяц</div>
             <input
               style={ui.input}
@@ -855,7 +868,7 @@ export default function Home() {
         {/* Savings / goal */}
         <section style={ui.card}>
           <div style={{ ...ui.row, alignItems: 'flex-start' }}>
-            <div style={{ flex: 1, minWidth: 320 }}>
+            <div style={{ flex: '2 1 520px', minWidth: 260 }}>
               <div style={ui.cardTitle}>🎯 Копилка и цель</div>
 
               <div style={{ ...ui.row, marginBottom: 10 }}>
@@ -871,7 +884,7 @@ export default function Home() {
 
               <div style={ui.divider} />
 
-              <div style={{ ...ui.cards, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+              <div style={{ ...ui.cards, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
                 <div>
                   <div style={{ ...ui.small, marginBottom: 6 }}>Цель (₽)</div>
                   <input style={ui.input} value={goalInput} onChange={e => setGoalInput(e.target.value)} placeholder="1000000" />
@@ -881,18 +894,21 @@ export default function Home() {
                   <input style={ui.input} value={targetMonthlyInput} onChange={e => setTargetMonthlyInput(e.target.value)} placeholder="например 50000" />
                 </div>
                 <div style={{ alignSelf: 'end' }}>
-                  <button style={ui.btnPrimary} onClick={saveSavingsSettings}>Сохранить настройки копилки</button>
+                  <button style={{ ...ui.btnPrimary, width: '100%' }} onClick={saveSavingsSettings}>
+                    Сохранить настройки копилки
+                  </button>
                 </div>
               </div>
             </div>
 
-            <div style={{ width: 360 }}>
+            {/* ✅ было width: 360 — делаем адаптив */}
+            <div style={{ flex: '1 1 360px', minWidth: 260, maxWidth: 520 }}>
               <div style={ui.cardTitle}>➕ Внести в копилку</div>
               <form onSubmit={addSavingsEntry} style={{ display: 'grid', gap: 8 }}>
                 <input type="date" style={ui.input as any} value={saveDate} onChange={e => setSaveDate(e.target.value)} />
                 <input style={ui.input} value={saveAmount} onChange={e => setSaveAmount(e.target.value)} placeholder="Сумма, ₽" />
                 <input style={ui.input} value={saveNote} onChange={e => setSaveNote(e.target.value)} placeholder="Комментарий (необязательно)" />
-                <button type="submit" style={ui.btnPrimary}>Добавить взнос</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить взнос</button>
               </form>
             </div>
           </div>
@@ -907,10 +923,18 @@ export default function Home() {
               savingsEntries.slice(0, 25).map(s => {
                 const isEdit = editingSaveId === s.id
                 return (
-                  <div key={s.id} style={{ padding: 12, borderRadius: 14, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(0,0,0,0.22)' }}>
+                  <div
+                    key={s.id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 14,
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      background: 'rgba(0,0,0,0.22)',
+                    }}
+                  >
                     {!isEdit ? (
                       <div style={ui.row}>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <b>{s.date}</b> • <b>{money(s.amount)}</b>
                           {s.note ? <span style={{ opacity: 0.7 }}> • {s.note}</span> : null}
                           <div style={ui.small}>Добавлено: {fmtDateTimeRu(s.created_at)}</div>
@@ -962,7 +986,7 @@ export default function Home() {
                   Облагается УСН 6%
                 </label>
                 <input value={incomeNote} onChange={e => setIncomeNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
-                <button type="submit" style={ui.btnPrimary}>Добавить доход</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить доход</button>
               </div>
             </form>
 
@@ -973,7 +997,7 @@ export default function Home() {
                 <input value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} placeholder="Сумма, ₽" style={ui.input} />
                 <input list="expense-cats" value={expenseCategory} onChange={e => setExpenseCategory(e.target.value)} placeholder="Категория" style={ui.input} />
                 <input value={expenseNote} onChange={e => setExpenseNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
-                <button type="submit" style={ui.btnPrimary}>Добавить расход</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить расход</button>
               </div>
             </form>
 
@@ -987,7 +1011,7 @@ export default function Home() {
                   <input value={loanDay} onChange={e => setLoanDay(e.target.value)} placeholder="День (1–28)" style={ui.input} />
                   <input value={loanRate} onChange={e => setLoanRate(e.target.value)} placeholder="Ставка, %" style={ui.input} />
                 </div>
-                <button type="submit" style={ui.btnPrimary}>Добавить кредит</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить кредит</button>
               </div>
             </form>
 
@@ -1004,7 +1028,7 @@ export default function Home() {
                 </select>
                 <input type="date" value={payLoanDate} onChange={e => setPayLoanDate(e.target.value)} style={ui.input as any} />
                 <input value={payLoanAmount} onChange={e => setPayLoanAmount(e.target.value)} placeholder="Сумма платежа, ₽" style={ui.input} />
-                <button type="submit" style={ui.btnPrimary}>Сохранить платёж</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Сохранить платёж</button>
               </div>
             </form>
           </div>
@@ -1020,10 +1044,18 @@ export default function Home() {
               const catsId = r.type === 'income' ? 'income-cats' : 'expense-cats'
 
               return (
-                <div key={r.id} style={{ padding: 12, borderRadius: 14, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(0,0,0,0.22)' }}>
+                <div
+                  key={r.id}
+                  style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    background: 'rgba(0,0,0,0.22)',
+                  }}
+                >
                   {!isEditing ? (
                     <div style={ui.row}>
-                      <div style={{ flex: 1 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <b>{r.type === 'expense' ? 'Расход' : 'Доход'}</b> • {r.category} {r.type === 'income' && r.taxable_usn ? '• УСН' : ''}
                         {r.note ? <span style={{ opacity: 0.7 }}> • {r.note}</span> : null}
                         <div style={ui.small}>
@@ -1069,3 +1101,4 @@ export default function Home() {
     </main>
   )
 }
+

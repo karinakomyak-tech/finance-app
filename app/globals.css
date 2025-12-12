@@ -1,109 +1,45 @@
-@import "tailwindcss";
+/* ✅ iPhone/мобилка: чтобы не было микропереполнений и “кривизны” */
+* { box-sizing: border-box; }
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-:root{
-  --bg: #0b0b0f;
-  --card: rgba(255,255,255,.04);
-  --border: rgba(255,255,255,.10);
-  --border2: rgba(255,255,255,.18);
-  --text: rgba(255,255,255,.92);
-  --muted: rgba(255,255,255,.68);
-}
-
-body{
-  background: radial-gradient(1200px 700px at 20% 0%, rgba(120,80,255,.18), transparent 60%),
-              radial-gradient(900px 500px at 80% 20%, rgba(0,200,255,.12), transparent 55%),
-              var(--bg);
-  color: var(--text);
-}
-
-.card{
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 14px;
-  box-shadow: 0 12px 30px rgba(0,0,0,.35);
-  backdrop-filter: blur(10px);
-}
-
-.h2{
-  font-weight: 900;
-  font-size: 18px;
-  margin: 0 0 10px 0;
-}
-
-.grid2{
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  align-items: start;
-}
-
-.field{
+html, body {
+  padding: 0;
+  margin: 0;
   width: 100%;
-  padding: 11px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(0,0,0,.25);
-  color: var(--text);
-  outline: none;
+  overflow-x: hidden;
+  background: #0b0b0b;
+  color: #f3f3f3;
 }
 
-.field:focus{
-  border-color: var(--border2);
-  box-shadow: 0 0 0 3px rgba(120,80,255,.18);
+:root { color-scheme: dark; }
+
+a { color: inherit; text-decoration: none; }
+
+/* ✅ чтобы все поля были одинаковые по шрифтам/высоте */
+input, select, textarea, button {
+  font: inherit;
 }
 
-.btn{
+/* ✅ фикс конкретно для iOS date input (это и есть “кривые даты”) */
+input[type="date"]{
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
   width: 100%;
-  padding: 11px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border2);
-  background: rgba(255,255,255,.06);
-  color: var(--text);
-  cursor: pointer;
+  min-height: 44px;      /* iOS любит 44px для контролов */
+  font-size: 16px;       /* важно: не будет авто-зума */
+  line-height: 20px;
 }
 
-.btn:hover{
-  background: rgba(255,255,255,.10);
+/* ✅ выравниваем текст даты внутри */
+input[type="date"]::-webkit-date-and-time-value{
+  text-align: left;
+  padding: 0;            /* иначе иногда смещает */
+  margin: 0;
 }
 
-.row{
-  display: grid;
-  gap: 10px;
-}
-
-.muted{ color: var(--muted); }
-.badge{
-  display:inline-flex;
-  gap:6px;
-  align-items:center;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 12px;
-  color: var(--muted);
+/* ✅ делаем иконку календаря не гигантской/не выносящей верстку */
+input[type="date"]::-webkit-calendar-picker-indicator{
+  opacity: 0.75;
+  margin: 0;
+  padding: 0;
 }
