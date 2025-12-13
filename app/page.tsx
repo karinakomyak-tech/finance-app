@@ -69,6 +69,28 @@ type SavingsEntry = {
   created_at: string
 }
 
+// ✅ кредитки
+type CardAccount = {
+  id: string
+  title: string
+  balance: number
+  statement_day: number
+  due_day: number
+  min_payment_rate: number
+  active: boolean
+  created_at: string
+}
+
+type CardEvent = {
+  id: string
+  card_id: string
+  date: string
+  kind: 'interest' | 'payment'
+  amount: number
+  note: string | null
+  created_at: string
+}
+
 function toDateOnly(d: Date) {
   return d.toISOString().slice(0, 10)
 }
@@ -123,13 +145,8 @@ const ui = {
   h1: { fontSize: 28, fontWeight: 900, margin: 0 } as CSSProperties,
   sub: { opacity: 0.78, marginTop: 6 } as CSSProperties,
 
-  grid: {
-    display: 'grid',
-    gap: 12,
-    marginTop: 14,
-  } as CSSProperties,
+  grid: { display: 'grid', gap: 12, marginTop: 14 } as CSSProperties,
 
-  // ✅ фикс "кривизны" на iPhone: уменьшаем min ширину карточек
   cards: {
     display: 'grid',
     gap: 12,
@@ -150,7 +167,6 @@ const ui = {
 
   row: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', minWidth: 0 } as CSSProperties,
 
-  // ✅ iOS: fontSize >= 16 чтобы не было авто-зума и "прыжков"
   input: {
     width: '100%',
     padding: '10px 12px',
@@ -183,6 +199,16 @@ const ui = {
     border: '1px solid rgba(255,255,255,0.18)',
     background: 'rgba(255,255,255,0.06)',
     color: '#f3f3f3',
+    cursor: 'pointer',
+    fontSize: 16,
+  } as CSSProperties,
+
+  btnDanger: {
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,120,120,0.35)',
+    background: 'rgba(255,80,80,0.12)',
+    color: '#ffd2d2',
     cursor: 'pointer',
     fontSize: 16,
   } as CSSProperties,
@@ -242,6 +268,10 @@ export default function Home() {
   const [savingsEntries, setSavingsEntries] = useState<SavingsEntry[]>([])
   const [loading, setLoading] = useState(false)
 
+  // ✅ credit cards
+  const [cards, setCards] = useState<CardAccount[]>([])
+  const [cardEvents, setCardEvents] = useState<Record<string, CardEvent[]>>({})
+
   // ---------- forms ----------
   const [incomeDate, setIncomeDate] = useState(today)
   const [incomeAmount, setIncomeAmount] = useState('')
@@ -268,6 +298,19 @@ export default function Home() {
   const [payLoanId, setPayLoanId] = useState<string>('')
   const [payLoanDate, setPayLoanDate] = useState(today)
   const [payLoanAmount, setPayLoanAmount] = useState('')
+
+  // credit card forms
+  const [cardTitle, setCardTitle] = useState('')
+  const [cardBalance, setCardBalance] = useState('')
+  const [cardStatementDay, setCardStatementDay] = useState('1')
+  const [cardDueDay, setCardDueDay] = useState('10')
+  const [cardMinRatePct, setCardMinRatePct] = useState('5')
+
+  const [cardEventCardId, setCardEventCardId] = useState('')
+  const [cardEventDate, setCardEventDate] = useState(today)
+  const [cardEventKind, setCardEventKind] = useState<'interest' | 'payment'>('interest')
+  const [cardEventAmount, setCardEventAmount] = useState('')
+  const [cardEventNote, setCardEventNote] = useState('')
 
   // savings
   const [goalInput, setGoalInput] = useState('1000000')
@@ -308,7 +351,12 @@ export default function Home() {
   }
 
   async function loadLoanPayments() {
-    const { data, error } = await supabase.from('loan_payments').select('*').order('payment_date', { ascending: false }).limit(500)
+    const { data, error } = await supabase
+      .from('loan_payments')
+      .select('*')
+      .order('payment_date', { ascending: false })
+      .limit(500)
+
     if (error) return alert('loan_payments: ' + error.message)
 
     const grouped: Record<string, LoanPayment[]> = {}
@@ -375,6 +423,25 @@ export default function Home() {
     setSavingsEntries((data as SavingsEntry[]) || [])
   }
 
+  // ✅ credit cards
+  async function loadCards() {
+    const { data, error } = await supabase.from('card_accounts').select('*').order('created_at', { ascending: false })
+    if (error) return alert('card_accounts: ' + error.message)
+    setCards((data as CardAccount[]) || [])
+  }
+
+  async function loadCardEvents() {
+    const { data, error } = await supabase.from('card_events').select('*').order('date', { ascending: false }).limit(600)
+    if (error) return alert('card_events: ' + error.message)
+
+    const grouped: Record<string, CardEvent[]> = {}
+    for (const e of (data as CardEvent[]) || []) {
+      if (!grouped[e.card_id]) grouped[e.card_id] = []
+      grouped[e.card_id].push(e)
+    }
+    setCardEvents(grouped)
+  }
+
   async function loadAll() {
     setLoading(true)
     await Promise.all([
@@ -385,12 +452,35 @@ export default function Home() {
       loadIpPayments(),
       ensureSavingsSettingsRow(),
       loadSavingsEntries(),
+      loadCards(),
+      loadCardEvents(),
     ])
     setLoading(false)
   }
 
   useEffect(() => {
     loadAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ✅ realtime авто-обновление (чтобы не нажимать “Обновить”)
+  useEffect(() => {
+    const ch = supabase
+      .channel('finance-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => loadTransactions())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'loans' }, () => loadLoans())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'loan_payments' }, () => loadLoanPayments())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ip_payments' }, () => loadIpPayments())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_entries' }, () => loadSavingsEntries())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_settings' }, () => ensureSavingsSettingsRow())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'card_accounts' }, () => loadCards())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'card_events' }, () => loadCardEvents())
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(ch)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // planned income in localStorage
@@ -435,7 +525,6 @@ export default function Home() {
 
     setIncomeAmount('')
     setIncomeNote('')
-    await loadTransactions()
   }
 
   async function submitExpense(e: React.FormEvent) {
@@ -455,7 +544,6 @@ export default function Home() {
 
     setExpenseAmount('')
     setExpenseNote('')
-    await loadTransactions()
   }
 
   async function submitIpPayment(e: React.FormEvent) {
@@ -473,7 +561,6 @@ export default function Home() {
 
     setIpPayAmount('')
     setIpPayNote('')
-    await loadIpPayments()
   }
 
   async function submitLoan(e: React.FormEvent) {
@@ -506,7 +593,6 @@ export default function Home() {
     setLoanTitle('')
     setLoanBalance('')
     setLoanMonthly('')
-    await loadLoans()
   }
 
   async function submitLoanPayment(e: React.FormEvent) {
@@ -547,8 +633,90 @@ export default function Home() {
     if (insErr) return alert(insErr.message)
 
     setPayLoanAmount('')
-    await Promise.all([loadLoans(), loadLoanPayments()])
     alert(`Платёж сохранён.\nДней: ${days}\nПроценты: ${money(interest_amount)}\nВ тело: ${money(principal_amount)}\nОстаток: ${money(balance_after)}`)
+  }
+
+  // ✅ УДАЛЕНИЕ КРЕДИТА
+  async function deleteLoan(l: Loan) {
+    const ok = confirm(`Удалить кредит?\n\n${l.title}\nОстаток: ${money(Number(l.balance))}\n\nВсе платежи по нему будут удалены.`)
+    if (!ok) return
+
+    const { error } = await supabase.from('loans').delete().eq('id', l.id)
+    if (error) return alert(error.message)
+
+    if (payLoanId === l.id) setPayLoanId('')
+  }
+
+  // ✅ КРЕДИТКИ: добавить карту
+  async function submitCard(e: React.FormEvent) {
+    e.preventDefault()
+
+    const title = cardTitle.trim()
+    if (!title) return alert('Название кредитки обязательно')
+
+    const bal = parseNumberLoose(cardBalance || '0')
+    const stDay = Number(cardStatementDay)
+    const dueDay = Number(cardDueDay)
+    const minPct = parseNumberLoose(cardMinRatePct)
+
+    if (!Number.isFinite(bal) || bal < 0) return alert('Некорректный долг')
+    if (!Number.isFinite(stDay) || stDay < 1 || stDay > 28) return alert('День выписки 1–28')
+    if (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 28) return alert('День платежа 1–28')
+    if (!Number.isFinite(minPct) || minPct < 0 || minPct > 100) return alert('Мин. платёж % — 0..100')
+
+    const { error } = await supabase.from('card_accounts').insert({
+      title,
+      balance: bal,
+      statement_day: stDay,
+      due_day: dueDay,
+      min_payment_rate: minPct / 100,
+      active: bal > 0,
+    })
+    if (error) return alert(error.message)
+
+    setCardTitle('')
+    setCardBalance('')
+  }
+
+  // ✅ КРЕДИТКИ: добавить событие (проценты/платеж)
+  async function submitCardEvent(e: React.FormEvent) {
+    e.preventDefault()
+
+    const card = cards.find(c => c.id === cardEventCardId)
+    if (!card) return alert('Выбери кредитку')
+
+    const amount = parseNumberLoose(cardEventAmount)
+    if (!Number.isFinite(amount) || amount <= 0) return alert('Некорректная сумма')
+
+    const delta = cardEventKind === 'payment' ? -amount : amount
+    const newBalance = Math.max(0, Number(card.balance) + delta)
+    const active = newBalance > 0
+
+    const { error: insErr } = await supabase.from('card_events').insert({
+      card_id: card.id,
+      date: cardEventDate,
+      kind: cardEventKind,
+      amount,
+      note: cardEventNote.trim() ? cardEventNote.trim() : null,
+    })
+    if (insErr) return alert(insErr.message)
+
+    const { error: updErr } = await supabase.from('card_accounts').update({ balance: newBalance, active }).eq('id', card.id)
+    if (updErr) return alert(updErr.message)
+
+    setCardEventAmount('')
+    setCardEventNote('')
+  }
+
+  // ✅ УДАЛЕНИЕ КРЕДИТКИ
+  async function deleteCard(c: CardAccount) {
+    const ok = confirm(`Удалить кредитку?\n\n${c.title}\nДолг: ${money(Number(c.balance))}\n\nСобытия (проценты/платежи) тоже удалятся.`)
+    if (!ok) return
+
+    const { error } = await supabase.from('card_accounts').delete().eq('id', c.id)
+    if (error) return alert(error.message)
+
+    if (cardEventCardId === c.id) setCardEventCardId('')
   }
 
   async function saveSavingsSettings() {
@@ -585,10 +753,8 @@ export default function Home() {
 
     setSaveAmount('')
     setSaveNote('')
-    await loadSavingsEntries()
   }
 
-  // ✅ кнопка “внести сегодня рекомендованную сумму”
   async function addRecommendedToday(savePerDayFromToday: number) {
     const todayStr = toDateOnly(new Date())
     const recommended = Math.max(0, Math.round(savePerDayFromToday))
@@ -607,12 +773,7 @@ export default function Home() {
       note: 'Рекомендовано системой',
     })
 
-    if (error) {
-      alert(error.message)
-      return
-    }
-
-    await loadSavingsEntries()
+    if (error) return alert(error.message)
   }
 
   function startEditTx(r: Transaction) {
@@ -640,7 +801,6 @@ export default function Home() {
     if (error) return alert(error.message)
 
     setEditingTxId('')
-    await loadTransactions()
   }
 
   async function deleteTx(r: Transaction) {
@@ -651,7 +811,6 @@ export default function Home() {
     if (error) return alert(error.message)
 
     if (editingTxId === r.id) setEditingTxId('')
-    await loadTransactions()
   }
 
   function startEditSave(s: SavingsEntry) {
@@ -672,7 +831,6 @@ export default function Home() {
 
     if (error) return alert(error.message)
     setEditingSaveId('')
-    await loadSavingsEntries()
   }
 
   async function deleteSave(s: SavingsEntry) {
@@ -683,13 +841,17 @@ export default function Home() {
     if (error) return alert(error.message)
 
     if (editingSaveId === s.id) setEditingSaveId('')
-    await loadSavingsEntries()
   }
 
   // default loan selection
   useEffect(() => {
     if (!payLoanId && loans.some(l => l.active)) setPayLoanId(loans.find(l => l.active)?.id || '')
   }, [loans, payLoanId])
+
+  // default card selection
+  useEffect(() => {
+    if (!cardEventCardId && cards.length > 0) setCardEventCardId(cards[0]?.id || '')
+  }, [cards, cardEventCardId])
 
   // ---------- calculations ----------
   const now = new Date()
@@ -726,7 +888,17 @@ export default function Home() {
   )
 
   const usnReserve = taxableIncomeMonth * 0.06
-  const loansPlannedMonth = useMemo(() => loans.filter(l => l.active).reduce((s, l) => s + Number(l.monthly_payment), 0), [loans])
+
+  const loansPlannedMonth = useMemo(
+    () => loans.filter(l => l.active).reduce((s, l) => s + Number(l.monthly_payment), 0),
+    [loans]
+  )
+
+  const cardsMinPlannedMonth = useMemo(() => {
+    return cards
+      .filter(c => c.active)
+      .reduce((s, c) => s + Number(c.balance) * Number(c.min_payment_rate || 0), 0)
+  }, [cards])
 
   // IP 1% сверх 300к в год
   const annualFixed = Number(ipSettings?.annual_fixed ?? 0)
@@ -766,7 +938,10 @@ export default function Home() {
   const rawPlanned = parseNumberLoose(plannedIncomeMonth)
   const baseIncomeForTips = Number.isFinite(rawPlanned) && rawPlanned > 0 ? rawPlanned : incomeMonth
 
-  const spendableMonthBeforeSaving = Math.max(0, baseIncomeForTips - usnReserve - loansPlannedMonth - ipReserveMonth)
+  const spendableMonthBeforeSaving = Math.max(
+    0,
+    baseIncomeForTips - usnReserve - loansPlannedMonth - cardsMinPlannedMonth - ipReserveMonth
+  )
   const allowedSpendMonth = Math.max(0, spendableMonthBeforeSaving - targetMonthly)
 
   const avgSpendPerDay = allowedSpendMonth / daysInMonth
@@ -777,7 +952,14 @@ export default function Home() {
   const savePerDayFromToday = remainingSaveThisMonth / daysLeftInMonth
   const avgSavePerDay = targetMonthly / daysInMonth
 
-  const freeMoney = incomeMonth - expenseMonth - usnReserve - loansPlannedMonth - ipReserveMonth - savedThisMonth
+  const freeMoney =
+    incomeMonth -
+    expenseMonth -
+    usnReserve -
+    loansPlannedMonth -
+    cardsMinPlannedMonth -
+    ipReserveMonth -
+    savedThisMonth
 
   return (
     <main style={ui.page}>
@@ -801,9 +983,12 @@ export default function Home() {
             <div style={{ ...ui.cardTitle, marginBottom: 8 }}>🧠 Рекомендации на месяц (чтобы накопить)</div>
 
             <div style={{ ...ui.row, marginBottom: 8 }}>
-              <span style={ui.pill}>Доход для расчёта: <b>{money(baseIncomeForTips)}</b></span>
               <span style={ui.pill}>
-                Обязательное: УСН {money(usnReserve)} • кредиты {money(loansPlannedMonth)} • взносы {money(ipReserveMonth)}
+                Доход для расчёта: <b>{money(baseIncomeForTips)}</b>
+              </span>
+              <span style={ui.pill}>
+                Обязательное: УСН {money(usnReserve)} • кредиты {money(loansPlannedMonth)} • кредитки (мин.){' '}
+                {money(cardsMinPlannedMonth)} • взносы {money(ipReserveMonth)}
               </span>
             </div>
 
@@ -834,10 +1019,7 @@ export default function Home() {
               </div>
 
               <div style={{ marginTop: 12 }}>
-                <button
-                  onClick={() => addRecommendedToday(savePerDayFromToday)}
-                  style={{ ...ui.btnPrimary, width: '100%' }}
-                >
+                <button onClick={() => addRecommendedToday(savePerDayFromToday)} style={{ ...ui.btnPrimary, width: '100%' }}>
                   ➕ Внести сегодня рекомендованную сумму ({money(Math.round(savePerDayFromToday))})
                 </button>
               </div>
@@ -848,7 +1030,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* ✅ было width: 320 — делаем адаптив */}
           <div style={{ flex: '1 1 320px', minWidth: 260, maxWidth: 420 }}>
             <div style={{ ...ui.cardTitle, marginBottom: 8 }}>План дохода на месяц</div>
             <input
@@ -857,9 +1038,7 @@ export default function Home() {
               onChange={e => setPlannedIncomeMonth(e.target.value)}
               placeholder="например 600000"
             />
-            <div style={{ ...ui.small, marginTop: 6 }}>
-              Если пусто — считаю по факту доходов.
-            </div>
+            <div style={{ ...ui.small, marginTop: 6 }}>Если пусто — считаю по факту доходов.</div>
           </div>
         </div>
       </section>
@@ -872,9 +1051,17 @@ export default function Home() {
               <div style={ui.cardTitle}>🎯 Копилка и цель</div>
 
               <div style={{ ...ui.row, marginBottom: 10 }}>
-                <span style={ui.pill}>В копилке всего: <b>{money(totalSavedAll)}</b></span>
-                <span style={ui.pill}>Осталось до цели: <b>{money(remainingToGoal)}</b></span>
-                {estMonths !== null ? <span style={ui.pill}>Месяцев до цели: <b>{estMonths}</b></span> : null}
+                <span style={ui.pill}>
+                  В копилке всего: <b>{money(totalSavedAll)}</b>
+                </span>
+                <span style={ui.pill}>
+                  Осталось до цели: <b>{money(remainingToGoal)}</b>
+                </span>
+                {estMonths !== null ? (
+                  <span style={ui.pill}>
+                    Месяцев до цели: <b>{estMonths}</b>
+                  </span>
+                ) : null}
               </div>
 
               <div style={ui.progressWrap}>
@@ -891,7 +1078,12 @@ export default function Home() {
                 </div>
                 <div>
                   <div style={{ ...ui.small, marginBottom: 6 }}>Хочу откладывать в месяц (₽)</div>
-                  <input style={ui.input} value={targetMonthlyInput} onChange={e => setTargetMonthlyInput(e.target.value)} placeholder="например 50000" />
+                  <input
+                    style={ui.input}
+                    value={targetMonthlyInput}
+                    onChange={e => setTargetMonthlyInput(e.target.value)}
+                    placeholder="например 50000"
+                  />
                 </div>
                 <div style={{ alignSelf: 'end' }}>
                   <button style={{ ...ui.btnPrimary, width: '100%' }} onClick={saveSavingsSettings}>
@@ -901,14 +1093,15 @@ export default function Home() {
               </div>
             </div>
 
-            {/* ✅ было width: 360 — делаем адаптив */}
             <div style={{ flex: '1 1 360px', minWidth: 260, maxWidth: 520 }}>
               <div style={ui.cardTitle}>➕ Внести в копилку</div>
               <form onSubmit={addSavingsEntry} style={{ display: 'grid', gap: 8 }}>
                 <input type="date" style={ui.input as any} value={saveDate} onChange={e => setSaveDate(e.target.value)} />
                 <input style={ui.input} value={saveAmount} onChange={e => setSaveAmount(e.target.value)} placeholder="Сумма, ₽" />
                 <input style={ui.input} value={saveNote} onChange={e => setSaveNote(e.target.value)} placeholder="Комментарий (необязательно)" />
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить взнос</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Добавить взнос
+                </button>
               </form>
             </div>
           </div>
@@ -939,8 +1132,12 @@ export default function Home() {
                           {s.note ? <span style={{ opacity: 0.7 }}> • {s.note}</span> : null}
                           <div style={ui.small}>Добавлено: {fmtDateTimeRu(s.created_at)}</div>
                         </div>
-                        <button style={ui.btn} onClick={() => startEditSave(s)}>Редактировать</button>
-                        <button style={ui.btn} onClick={() => deleteSave(s)}>Удалить</button>
+                        <button style={ui.btn} onClick={() => startEditSave(s)}>
+                          Редактировать
+                        </button>
+                        <button style={ui.btn} onClick={() => deleteSave(s)}>
+                          Удалить
+                        </button>
                       </div>
                     ) : (
                       <>
@@ -951,8 +1148,12 @@ export default function Home() {
                           <input style={ui.input} value={saveEditNote} onChange={e => setSaveEditNote(e.target.value)} placeholder="Комментарий" />
                         </div>
                         <div style={{ ...ui.row, marginTop: 10 }}>
-                          <button style={ui.btnPrimary} onClick={() => saveEditSave(s)}>Сохранить</button>
-                          <button style={ui.btn} onClick={() => setEditingSaveId('')}>Отмена</button>
+                          <button style={ui.btnPrimary} onClick={() => saveEditSave(s)}>
+                            Сохранить
+                          </button>
+                          <button style={ui.btn} onClick={() => setEditingSaveId('')}>
+                            Отмена
+                          </button>
                         </div>
                       </>
                     )}
@@ -963,16 +1164,12 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Add income/expense + loans */}
+        {/* Add income/expense + loans + cards */}
         <section style={ui.card}>
-          <div style={ui.cardTitle}>Добавление (доход / расход / кредиты)</div>
+          <div style={ui.cardTitle}>Добавление (доход / расход / кредиты / кредитки)</div>
 
-          <datalist id="income-cats">
-            {incomeCategories.map(c => <option key={c} value={c} />)}
-          </datalist>
-          <datalist id="expense-cats">
-            {expenseCategories.map(c => <option key={c} value={c} />)}
-          </datalist>
+          <datalist id="income-cats">{incomeCategories.map(c => <option key={c} value={c} />)}</datalist>
+          <datalist id="expense-cats">{expenseCategories.map(c => <option key={c} value={c} />)}</datalist>
 
           <div style={ui.cards}>
             <form onSubmit={submitIncome} style={ui.card}>
@@ -986,7 +1183,9 @@ export default function Home() {
                   Облагается УСН 6%
                 </label>
                 <input value={incomeNote} onChange={e => setIncomeNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить доход</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Добавить доход
+                </button>
               </div>
             </form>
 
@@ -997,7 +1196,9 @@ export default function Home() {
                 <input value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} placeholder="Сумма, ₽" style={ui.input} />
                 <input list="expense-cats" value={expenseCategory} onChange={e => setExpenseCategory(e.target.value)} placeholder="Категория" style={ui.input} />
                 <input value={expenseNote} onChange={e => setExpenseNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить расход</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Добавить расход
+                </button>
               </div>
             </form>
 
@@ -1011,12 +1212,14 @@ export default function Home() {
                   <input value={loanDay} onChange={e => setLoanDay(e.target.value)} placeholder="День (1–28)" style={ui.input} />
                   <input value={loanRate} onChange={e => setLoanRate(e.target.value)} placeholder="Ставка, %" style={ui.input} />
                 </div>
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить кредит</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Добавить кредит
+                </button>
               </div>
             </form>
 
             <form onSubmit={submitLoanPayment} style={ui.card}>
-              <div style={ui.cardTitle}>Отметить платёж по кредиту</div>
+              <div style={ui.cardTitle}>Платёж по кредиту</div>
               <div style={{ display: 'grid', gap: 8 }}>
                 <select value={payLoanId} onChange={e => setPayLoanId(e.target.value)} style={ui.select}>
                   <option value="">— выбери кредит —</option>
@@ -1028,10 +1231,154 @@ export default function Home() {
                 </select>
                 <input type="date" value={payLoanDate} onChange={e => setPayLoanDate(e.target.value)} style={ui.input as any} />
                 <input value={payLoanAmount} onChange={e => setPayLoanAmount(e.target.value)} placeholder="Сумма платежа, ₽" style={ui.input} />
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Сохранить платёж</button>
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Сохранить платёж
+                </button>
+              </div>
+            </form>
+
+            {/* credit cards */}
+            <form onSubmit={submitCard} style={ui.card}>
+              <div style={ui.cardTitle}>+ Кредитка</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                <input value={cardTitle} onChange={e => setCardTitle(e.target.value)} placeholder="Название (Тинькофф Platinum…)" style={ui.input} />
+                <input value={cardBalance} onChange={e => setCardBalance(e.target.value)} placeholder="Текущий долг (можно 0), ₽" style={ui.input} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <input value={cardStatementDay} onChange={e => setCardStatementDay(e.target.value)} placeholder="День выписки 1–28" style={ui.input} />
+                  <input value={cardDueDay} onChange={e => setCardDueDay(e.target.value)} placeholder="День платежа 1–28" style={ui.input} />
+                </div>
+                <input value={cardMinRatePct} onChange={e => setCardMinRatePct(e.target.value)} placeholder="Мин. платёж %, например 5" style={ui.input} />
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Добавить кредитку
+                </button>
+              </div>
+            </form>
+
+            <form onSubmit={submitCardEvent} style={ui.card}>
+              <div style={ui.cardTitle}>Событие по кредитке (по выписке)</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                <select value={cardEventCardId} onChange={e => setCardEventCardId(e.target.value)} style={ui.select}>
+                  <option value="">— выбери кредитку —</option>
+                  {cards.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.title} {c.active ? '' : '(0)'}
+                    </option>
+                  ))}
+                </select>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <select value={cardEventKind} onChange={e => setCardEventKind(e.target.value as any)} style={ui.select}>
+                    <option value="interest">Проценты по выписке</option>
+                    <option value="payment">Платёж</option>
+                  </select>
+                  <input type="date" value={cardEventDate} onChange={e => setCardEventDate(e.target.value)} style={ui.input as any} />
+                </div>
+
+                <input value={cardEventAmount} onChange={e => setCardEventAmount(e.target.value)} placeholder="Сумма, ₽" style={ui.input} />
+                <input value={cardEventNote} onChange={e => setCardEventNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Сохранить событие
+                </button>
               </div>
             </form>
           </div>
+        </section>
+
+        {/* Loans + Cards lists */}
+        <section style={ui.card}>
+          <div style={ui.cardTitle}>Кредиты и кредитки (удаление)</div>
+
+          <div style={ui.divider} />
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Кредиты</div>
+
+          {loans.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>Кредитов нет.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {loans.map(l => (
+                <div
+                  key={l.id}
+                  style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    background: 'rgba(0,0,0,0.22)',
+                  }}
+                >
+                  <div style={{ ...ui.row, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <b>{l.title}</b> {l.active ? '' : '• (закрыт)'}
+                      <div style={ui.small}>
+                        Остаток: <b>{money(Number(l.balance))}</b> • Платёж/мес: <b>{money(Number(l.monthly_payment))}</b> • День: {l.payment_day} • Ставка:{' '}
+                        {Number(l.annual_rate ?? 0)}%
+                      </div>
+                    </div>
+                    <button style={ui.btnDanger} onClick={() => deleteLoan(l)}>
+                      Удалить
+                    </button>
+                  </div>
+
+                  {loanPayments[l.id]?.length ? (
+                    <div style={{ marginTop: 8, opacity: 0.9 }}>
+                      <div style={{ ...ui.small, marginBottom: 6 }}>Последние платежи:</div>
+                      {loanPayments[l.id].slice(0, 3).map(p => (
+                        <div key={p.id} style={ui.small}>
+                          {p.payment_date} • платёж {money(Number(p.payment_amount))} • проценты {money(Number(p.interest_amount))} • в тело {money(Number(p.principal_amount))} • остаток {money(Number(p.balance_after))}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={ui.divider} />
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Кредитки</div>
+
+          {cards.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>Кредиток нет.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {cards.map(c => {
+                const minPay = Number(c.balance) * Number(c.min_payment_rate || 0)
+                return (
+                  <div
+                    key={c.id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 14,
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      background: 'rgba(0,0,0,0.22)',
+                    }}
+                  >
+                    <div style={{ ...ui.row, alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <b>{c.title}</b> {c.active ? '' : '• (0)'}
+                        <div style={ui.small}>
+                          Долг: <b>{money(Number(c.balance))}</b> • Мин. платёж: <b>{money(minPay)}</b> • Выписка: {c.statement_day} • Платёж: {c.due_day}
+                        </div>
+                      </div>
+                      <button style={ui.btnDanger} onClick={() => deleteCard(c)}>
+                        Удалить
+                      </button>
+                    </div>
+
+                    {cardEvents[c.id]?.length ? (
+                      <div style={{ marginTop: 8, opacity: 0.9 }}>
+                        <div style={{ ...ui.small, marginBottom: 6 }}>Последние события:</div>
+                        {cardEvents[c.id].slice(0, 3).map(e => (
+                          <div key={e.id} style={ui.small}>
+                            {e.date} • {e.kind === 'interest' ? 'проценты' : 'платёж'} • {money(Number(e.amount))}{e.note ? ` • ${e.note}` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         {/* Transactions list */}
@@ -1056,7 +1403,8 @@ export default function Home() {
                   {!isEditing ? (
                     <div style={ui.row}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <b>{r.type === 'expense' ? 'Расход' : 'Доход'}</b> • {r.category} {r.type === 'income' && r.taxable_usn ? '• УСН' : ''}
+                        <b>{r.type === 'expense' ? 'Расход' : 'Доход'}</b> • {r.category}{' '}
+                        {r.type === 'income' && r.taxable_usn ? '• УСН' : ''}
                         {r.note ? <span style={{ opacity: 0.7 }}> • {r.note}</span> : null}
                         <div style={ui.small}>
                           Дата операции: <b>{r.date}</b> • Добавлено: {fmtDateTimeRu(r.created_at)}
@@ -1064,8 +1412,12 @@ export default function Home() {
                       </div>
 
                       <div style={{ fontWeight: 900 }}>{money(r.amount)}</div>
-                      <button style={ui.btn} onClick={() => startEditTx(r)}>Редактировать</button>
-                      <button style={ui.btn} onClick={() => deleteTx(r)}>Удалить</button>
+                      <button style={ui.btn} onClick={() => startEditTx(r)}>
+                        Редактировать
+                      </button>
+                      <button style={ui.btn} onClick={() => deleteTx(r)}>
+                        Удалить
+                      </button>
                     </div>
                   ) : (
                     <>
@@ -1087,8 +1439,12 @@ export default function Home() {
                       </div>
 
                       <div style={{ ...ui.row, marginTop: 10 }}>
-                        <button style={ui.btnPrimary} onClick={() => saveEditTx(r)}>Сохранить</button>
-                        <button style={ui.btn} onClick={() => setEditingTxId('')}>Отмена</button>
+                        <button style={ui.btnPrimary} onClick={() => saveEditTx(r)}>
+                          Сохранить
+                        </button>
+                        <button style={ui.btn} onClick={() => setEditingTxId('')}>
+                          Отмена
+                        </button>
                       </div>
                     </>
                   )}
@@ -1101,4 +1457,5 @@ export default function Home() {
     </main>
   )
 }
+
 
