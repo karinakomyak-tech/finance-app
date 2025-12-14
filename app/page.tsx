@@ -519,47 +519,84 @@ export default function Home() {
     await loadLoans()
   }
 
-  async function submitLoanPayment(e: React.FormEvent) {
-    e.preventDefault()
-    const loan = loans.find(l => l.id === payLoanId)
-    if (!loan) return alert('Выбери кредит')
+async function submitLoanPayment(e: React.FormEvent) {
+  e.preventDefault()
+  const loan = loans.find(l => l.id === payLoanId)
+  if (!loan) return alert('Выбери кредит')
 
-    const payment_amount = parseNumberLoose(payLoanAmount)
-    if (!Number.isFinite(payment_amount) || payment_amount <= 0) return alert('Некорректная сумма платежа')
+  const payment_amount = parseNumberLoose(payLoanAmount)
+  if (!Number.isFinite(payment_amount) || payment_amount <= 0) return alert('Некорректная сумма платежа')
 
-    const annualRate = Number(loan.annual_rate ?? 0)
-    const dailyRate = annualRate / 100 / 365
+  const annualRate = Number(loan.annual_rate ?? 0)
+  const dailyRate = annualRate / 100 / 365
 
-    const startDate = (loan.last_payment_date ?? loan.created_at.slice(0, 10)).slice(0, 10)
-    const days = daysBetween(startDate, payLoanDate)
+  const startDate = (loan.last_payment_date ?? loan.created_at.slice(0, 10)).slice(0, 10)
+  const days = daysBetween(startDate, payLoanDate)
 
-    const balance_before = Number(loan.balance)
-    const interest_amount = balance_before * dailyRate * days
-    const principal_amount = Math.max(0, payment_amount - interest_amount)
-    const balance_after = Math.max(0, balance_before - principal_amount)
-    const active = balance_after > 0
+  const balance_before = Number(loan.balance)
+  const interest_amount = balance_before * dailyRate * days
+  const principal_amount = Math.max(0, payment_amount - interest_amount)
+  const balance_after = Math.max(0, balance_before - principal_amount)
+  const active = balance_after > 0
 
-    const { error: updErr } = await supabase
-      .from('loans')
-      .update({ balance: balance_after, active, last_payment_date: payLoanDate })
-      .eq('id', loan.id)
-    if (updErr) return alert(updErr.message)
+  // 1) обновляем кредит (остаток/дата)
+  const { error: updErr } = await supabase
+    .from('loans')
+    .update({ balance: balance_after, active, last_payment_date: payLoanDate })
+    .eq('id', loan.id)
 
-    const { error: insErr } = await supabase.from('loan_payments').insert({
-      loan_id: loan.id,
-      payment_date: payLoanDate,
-      payment_amount,
-      interest_amount,
-      principal_amount,
-      balance_before,
-      balance_after,
-    })
-    if (insErr) return alert(insErr.message)
+  if (updErr) return alert(updErr.message)
 
-    setPayLoanAmount('')
-    await Promise.all([loadLoans(), loadLoanPayments()])
-    alert(`Платёж сохранён.\nДней: ${days}\nПроценты: ${money(interest_amount)}\nВ тело: ${money(principal_amount)}\nОстаток: ${money(balance_after)}`)
+  // 2) записываем платёж в историю loan_payments
+  const { error: insErr } = await supabase.from('loan_payments').insert({
+    loan_id: loan.id,
+    payment_date: payLoanDate,
+    payment_amount,
+    interest_amount,
+    principal_amount,
+    balance_before,
+    balance_after,
+  })
+
+  if (insErr) return alert(insErr.message)
+
+  // 3) ✅ ДОБАВЛЯЕМ В РАСХОДЫ (transactions)
+  // category сделаем понятной, чтобы фильтровать/искать
+  const expenseCategory = `Кредит: ${loan.title}`
+
+  const { error: txErr } = await supabase.from('transactions').insert({
+    date: payLoanDate,
+    type: 'expense',
+    amount: payment_amount,
+    category: expenseCategory,
+    taxable_usn: null,
+    note: `Платёж по кредиту. Проценты: ${Math.round(interest_amount)}₽, тело: ${Math.round(principal_amount)}₽`,
+  })
+
+  if (txErr) {
+    // Кредит уже обновили и платёж записали, но расход не добавился — сообщаем честно
+    alert(
+      'Платёж по кредиту сохранён, но НЕ удалось записать его в расходы.\n' +
+        'Ошибка: ' + txErr.message + '\n\n' +
+        'Можно добавить расход вручную: категория "' + expenseCategory + '", сумма ' + Math.round(payment_amount) + '₽, дата ' + payLoanDate
+    )
   }
+
+  setPayLoanAmount('')
+
+  // 4) обновляем всё, чтобы сразу видеть и кредит, и расход, и историю
+  await Promise.all([loadLoans(), loadLoanPayments(), loadTransactions()])
+
+  alert(
+    `Платёж сохранён.\n` +
+      `Дней: ${days}\n` +
+      `Проценты: ${money(interest_amount)}\n` +
+      `В тело: ${money(principal_amount)}\n` +
+      `Остаток: ${money(balance_after)}\n` +
+      `+ записано в расходы: ${money(payment_amount)}`
+  )
+}
+
 
   async function saveSavingsSettings() {
     if (!savingsSettings) return alert('Настройки копилки не загрузились')
