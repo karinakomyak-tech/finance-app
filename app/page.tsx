@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { supabase } from '../lib/supabase'
 
-/* ===================== TYPES ===================== */
-
 type Transaction = {
   id: string
   date: string
@@ -71,7 +69,20 @@ type SavingsEntry = {
   created_at: string
 }
 
-/** credit cards */
+type ReserveSettings = {
+  id: string
+  target_monthly: number
+  created_at: string
+}
+
+type ReserveEntry = {
+  id: string
+  date: string
+  amount: number
+  note: string | null
+  created_at: string
+}
+
 type CardAccount = {
   id: string
   title: string
@@ -92,8 +103,6 @@ type CardEvent = {
   note: string | null
   created_at: string
 }
-
-/* ===================== HELPERS ===================== */
 
 function toDateOnly(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -128,7 +137,10 @@ function fmtDateTimeRu(iso: string) {
   }).format(d)
 }
 
-/* ===================== UI ===================== */
+function monthLabel(ym: string) {
+  const d = new Date(ym + '-01T00:00:00')
+  return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(d)
+}
 
 const ui = {
   page: {
@@ -146,13 +158,16 @@ const ui = {
     gap: 12,
     flexWrap: 'wrap',
     alignItems: 'baseline',
-    minWidth: 0,
   } as CSSProperties,
 
-  h1: { fontSize: 26, fontWeight: 900, margin: 0, lineHeight: 1.15 } as CSSProperties,
+  h1: { fontSize: 26, fontWeight: 900, margin: 0 } as CSSProperties,
   sub: { opacity: 0.78, marginTop: 6 } as CSSProperties,
 
-  grid: { display: 'grid', gap: 12, marginTop: 14 } as CSSProperties,
+  grid: {
+    display: 'grid',
+    gap: 12,
+    marginTop: 14,
+  } as CSSProperties,
 
   cards: {
     display: 'grid',
@@ -172,13 +187,7 @@ const ui = {
   cardTitle: { fontWeight: 900, marginBottom: 10 } as CSSProperties,
   small: { fontSize: 12, opacity: 0.72 } as CSSProperties,
 
-  row: {
-    display: 'flex',
-    gap: 10,
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    minWidth: 0,
-  } as CSSProperties,
+  row: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', minWidth: 0 } as CSSProperties,
 
   input: {
     width: '100%',
@@ -189,8 +198,9 @@ const ui = {
     color: '#f3f3f3',
     outline: 'none',
     boxSizing: 'border-box',
-    fontSize: 16, // iOS zoom fix
+    fontSize: 16,
     lineHeight: '20px',
+    minWidth: 0,
   } as CSSProperties,
 
   select: {
@@ -204,6 +214,7 @@ const ui = {
     boxSizing: 'border-box',
     fontSize: 16,
     lineHeight: '20px',
+    minWidth: 0,
   } as CSSProperties,
 
   btn: {
@@ -214,6 +225,7 @@ const ui = {
     color: '#f3f3f3',
     cursor: 'pointer',
     fontSize: 16,
+    whiteSpace: 'nowrap',
   } as CSSProperties,
 
   btnPrimary: {
@@ -225,6 +237,7 @@ const ui = {
     cursor: 'pointer',
     fontWeight: 800,
     fontSize: 16,
+    whiteSpace: 'nowrap',
   } as CSSProperties,
 
   divider: { height: 1, background: 'rgba(255,255,255,0.08)', margin: '10px 0' } as CSSProperties,
@@ -259,10 +272,14 @@ const ui = {
     }) as CSSProperties,
 }
 
-/* ===================== PAGE ===================== */
-
 export default function Home() {
   const today = toDateOnly(new Date())
+  const now = new Date()
+  const currentMonth = now.toISOString().slice(0, 7)
+  const currentYear = now.toISOString().slice(0, 4)
+
+  // ✅ выбранный месяц для отображения / расчётов
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth)
 
   // ---------- data ----------
   const [rows, setRows] = useState<Transaction[]>([])
@@ -272,9 +289,10 @@ export default function Home() {
   const [ipPayments, setIpPayments] = useState<IpPayment[]>([])
   const [savingsSettings, setSavingsSettings] = useState<SavingsSettings | null>(null)
   const [savingsEntries, setSavingsEntries] = useState<SavingsEntry[]>([])
+  const [reserveSettings, setReserveSettings] = useState<ReserveSettings | null>(null)
+  const [reserveEntries, setReserveEntries] = useState<ReserveEntry[]>([])
   const [cards, setCards] = useState<CardAccount[]>([])
   const [cardEvents, setCardEvents] = useState<Record<string, CardEvent[]>>({})
-
   const [loading, setLoading] = useState(false)
 
   // ---------- forms ----------
@@ -312,25 +330,27 @@ export default function Home() {
   const [saveAmount, setSaveAmount] = useState('')
   const [saveNote, setSaveNote] = useState('')
 
+  // reserve
+  const [reserveTargetMonthlyInput, setReserveTargetMonthlyInput] = useState('0')
+  const [reserveDate, setReserveDate] = useState(today)
+  const [reserveAmount, setReserveAmount] = useState('')
+  const [reserveNote, setReserveNote] = useState('')
+
   // planned income (local)
   const [plannedIncomeMonth, setPlannedIncomeMonth] = useState<string>('')
 
-  // credit cards forms
+  // credit cards
   const [cardTitle, setCardTitle] = useState('')
   const [cardBalance, setCardBalance] = useState('')
   const [cardStatementDay, setCardStatementDay] = useState('1')
   const [cardDueDay, setCardDueDay] = useState('10')
-  const [cardMinRate, setCardMinRate] = useState('5')
+  const [cardMinRate, setCardMinRate] = useState('0.05')
 
-  const [payCardId, setPayCardId] = useState<string>('')
-  const [payCardDate, setPayCardDate] = useState(today)
-  const [payCardAmount, setPayCardAmount] = useState('')
-  const [payCardNote, setPayCardNote] = useState('')
-
-  const [intCardId, setIntCardId] = useState<string>('')
-  const [intCardDate, setIntCardDate] = useState(today)
-  const [intCardAmount, setIntCardAmount] = useState('')
-  const [intCardNote, setIntCardNote] = useState('')
+  const [cardEventCardId, setCardEventCardId] = useState<string>('')
+  const [cardEventDate, setCardEventDate] = useState(today)
+  const [cardEventKind, setCardEventKind] = useState<'interest' | 'payment'>('payment')
+  const [cardEventAmount, setCardEventAmount] = useState('')
+  const [cardEventNote, setCardEventNote] = useState('')
 
   // edit states (transactions)
   const [editingTxId, setEditingTxId] = useState<string>('')
@@ -340,14 +360,7 @@ export default function Home() {
   const [txEditNote, setTxEditNote] = useState('')
   const [txEditTaxable, setTxEditTaxable] = useState(false)
 
-  // edit savings
-  const [editingSaveId, setEditingSaveId] = useState('')
-  const [saveEditDate, setSaveEditDate] = useState(today)
-  const [saveEditAmount, setSaveEditAmount] = useState('')
-  const [saveEditNote, setSaveEditNote] = useState('')
-
-  /* ===================== LOAD ===================== */
-
+  // ---------- load ----------
   async function loadTransactions() {
     const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false })
     if (error) return alert('transactions: ' + error.message)
@@ -361,7 +374,7 @@ export default function Home() {
   }
 
   async function loadLoanPayments() {
-    const { data, error } = await supabase.from('loan_payments').select('*').order('payment_date', { ascending: false }).limit(1000)
+    const { data, error } = await supabase.from('loan_payments').select('*').order('payment_date', { ascending: false }).limit(800)
     if (error) return alert('loan_payments: ' + error.message)
 
     const grouped: Record<string, LoanPayment[]> = {}
@@ -393,7 +406,7 @@ export default function Home() {
   }
 
   async function loadIpPayments() {
-    const { data, error } = await supabase.from('ip_payments').select('*').order('date', { ascending: false }).limit(500)
+    const { data, error } = await supabase.from('ip_payments').select('*').order('date', { ascending: false }).limit(400)
     if (error) return alert('ip_payments: ' + error.message)
     setIpPayments((data as IpPayment[]) || [])
   }
@@ -423,9 +436,37 @@ export default function Home() {
   }
 
   async function loadSavingsEntries() {
-    const { data, error } = await supabase.from('savings_entries').select('*').order('date', { ascending: false }).limit(500)
+    const { data, error } = await supabase.from('savings_entries').select('*').order('date', { ascending: false }).limit(400)
     if (error) return alert('savings_entries: ' + error.message)
     setSavingsEntries((data as SavingsEntry[]) || [])
+  }
+
+  async function ensureReserveSettingsRow() {
+    const { data, error } = await supabase.from('reserve_settings').select('*').order('created_at', { ascending: false }).limit(1)
+    if (error) return alert('reserve_settings: ' + error.message)
+
+    const row = (data as ReserveSettings[] | null)?.[0] ?? null
+    if (row) {
+      setReserveSettings(row)
+      setReserveTargetMonthlyInput(String(row.target_monthly ?? 0))
+      return
+    }
+
+    const { data: insData, error: insErr } = await supabase
+      .from('reserve_settings')
+      .insert({ target_monthly: 0 })
+      .select('*')
+      .single()
+
+    if (insErr) return alert('reserve_settings insert: ' + insErr.message)
+    setReserveSettings(insData as ReserveSettings)
+    setReserveTargetMonthlyInput(String((insData as ReserveSettings).target_monthly))
+  }
+
+  async function loadReserveEntries() {
+    const { data, error } = await supabase.from('reserve_entries').select('*').order('date', { ascending: false }).limit(400)
+    if (error) return alert('reserve_entries: ' + error.message)
+    setReserveEntries((data as ReserveEntry[]) || [])
   }
 
   async function loadCards() {
@@ -435,13 +476,13 @@ export default function Home() {
   }
 
   async function loadCardEvents() {
-    const { data, error } = await supabase.from('card_events').select('*').order('date', { ascending: false }).limit(2000)
+    const { data, error } = await supabase.from('card_events').select('*').order('date', { ascending: false }).limit(1200)
     if (error) return alert('card_events: ' + error.message)
 
     const grouped: Record<string, CardEvent[]> = {}
-    for (const e of (data as CardEvent[]) || []) {
-      if (!grouped[e.card_id]) grouped[e.card_id] = []
-      grouped[e.card_id].push(e)
+    for (const ev of (data as CardEvent[]) || []) {
+      if (!grouped[ev.card_id]) grouped[ev.card_id] = []
+      grouped[ev.card_id].push(ev)
     }
     setCardEvents(grouped)
   }
@@ -456,6 +497,8 @@ export default function Home() {
       loadIpPayments(),
       ensureSavingsSettingsRow(),
       loadSavingsEntries(),
+      ensureReserveSettingsRow(),
+      loadReserveEntries(),
       loadCards(),
       loadCardEvents(),
     ])
@@ -464,6 +507,58 @@ export default function Home() {
 
   useEffect(() => {
     loadAll()
+  }, [])
+
+  // ✅ авто-обновление: любые изменения в таблицах → loadAll()
+  useEffect(() => {
+    const channel = supabase
+      .channel('finance-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'transactions' },
+        () => loadAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'loans' },
+        () => loadAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'loan_payments' },
+        () => loadAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ip_payments' },
+        () => loadAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'savings_entries' },
+        () => loadAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reserve_entries' },
+        () => loadAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'card_accounts' },
+        () => loadAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'card_events' },
+        () => loadAll()
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // planned income in localStorage
@@ -479,6 +574,27 @@ export default function Home() {
     if (typeof window !== 'undefined') window.localStorage.setItem(k, plannedIncomeMonth)
   }, [plannedIncomeMonth])
 
+  // ✅ доступные месяцы (из всех таблиц)
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of rows) set.add(r.date.slice(0, 7))
+    for (const s of savingsEntries) set.add(s.date.slice(0, 7))
+    for (const r of reserveEntries) set.add(r.date.slice(0, 7))
+    for (const p of ipPayments) set.add(p.date.slice(0, 7))
+    // события кредиток
+    for (const cid of Object.keys(cardEvents)) {
+      for (const ev of cardEvents[cid] || []) set.add(ev.date.slice(0, 7))
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a))
+  }, [rows, savingsEntries, reserveEntries, ipPayments, cardEvents])
+
+  useEffect(() => {
+    if (!availableMonths.includes(selectedMonth)) {
+      setSelectedMonth(availableMonths[0] ?? currentMonth)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableMonths])
+
   // categories suggestions
   const incomeCategories = useMemo(() => {
     const set = new Set(rows.filter(r => r.type === 'income').map(r => (r.category || '').trim()).filter(Boolean))
@@ -490,8 +606,7 @@ export default function Home() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'))
   }, [rows])
 
-  /* ===================== ACTIONS ===================== */
-
+  // ---------- actions ----------
   async function submitIncome(e: React.FormEvent) {
     e.preventDefault()
     const amount = parseNumberLoose(incomeAmount)
@@ -532,6 +647,7 @@ export default function Home() {
     await loadTransactions()
   }
 
+  // ✅ ИП оплаты тоже можно писать как расход (если хочешь)
   async function submitIpPayment(e: React.FormEvent) {
     e.preventDefault()
     const amount = parseNumberLoose(ipPayAmount)
@@ -545,14 +661,14 @@ export default function Home() {
     })
     if (error) return alert(error.message)
 
-    // ✅ считаем налог как расход денег (чтобы остаток совпадал)
+    // ✅ автозапись в расходы (чтобы остаток был честный)
     await supabase.from('transactions').insert({
       date: ipPayDate,
       type: 'expense',
       amount,
-      category: `Налоги/взносы ИП (${ipPayKind})`,
+      category: 'Налоги/взносы (ИП)',
       taxable_usn: null,
-      note: ipPayNote.trim() ? ipPayNote.trim() : null,
+      note: `AUTO:ip_payment:${ipPayKind}${ipPayNote.trim() ? ` • ${ipPayNote.trim()}` : ''}`,
     })
 
     setIpPayAmount('')
@@ -593,12 +709,28 @@ export default function Home() {
     await loadLoans()
   }
 
-  async function deleteLoan(loan: Loan) {
-    const ok = confirm(`Удалить кредит "${loan.title}"?\nБудут удалены и платежи по нему.`)
-    if (!ok) return
-    const { error } = await supabase.from('loans').delete().eq('id', loan.id)
-    if (error) return alert(error.message)
-    await Promise.all([loadLoans(), loadLoanPayments()])
+  // ✅ защита от дубля авто-расхода
+  async function ensureAutoExpenseOnce(date: string, amount: number, category: string, noteMarker: string) {
+    const { data } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('date', date)
+      .eq('type', 'expense')
+      .eq('amount', amount)
+      .eq('category', category)
+      .like('note', `%${noteMarker}%`)
+      .limit(1)
+
+    if ((data as any[])?.length) return
+
+    await supabase.from('transactions').insert({
+      date,
+      type: 'expense',
+      amount,
+      category,
+      taxable_usn: null,
+      note: noteMarker,
+    })
   }
 
   async function submitLoanPayment(e: React.FormEvent) {
@@ -638,22 +770,14 @@ export default function Home() {
     })
     if (insErr) return alert(insErr.message)
 
-    // ✅ ВАЖНО: платеж по кредиту = расход денег (в операции)
-    const { error: txErr } = await supabase.from('transactions').insert({
-      date: payLoanDate,
-      type: 'expense',
-      amount: payment_amount,
-      category: `Кредит: ${loan.title}`,
-      taxable_usn: null,
-      note: `Платёж по кредиту (проценты: ${Math.round(interest_amount)}₽, тело: ${Math.round(principal_amount)}₽)`,
-    })
-    if (txErr) return alert('transactions insert (loan pay): ' + txErr.message)
+    // ✅ ВАЖНО: автозапись платежа в расходы
+    const category = `Кредит: ${loan.title}`
+    const noteMarker = `AUTO:loan_payment:${loan.id}`
+    await ensureAutoExpenseOnce(payLoanDate, payment_amount, category, noteMarker)
 
     setPayLoanAmount('')
     await Promise.all([loadLoans(), loadLoanPayments(), loadTransactions()])
-    alert(
-      `Платёж сохранён.\nДней: ${days}\nПроценты: ${money(interest_amount)}\nВ тело: ${money(principal_amount)}\nОстаток: ${money(balance_after)}`
-    )
+    alert(`Платёж сохранён.\nДней: ${days}\nПроценты: ${money(interest_amount)}\nВ тело: ${money(principal_amount)}\nОстаток: ${money(balance_after)}`)
   }
 
   async function saveSavingsSettings() {
@@ -688,129 +812,43 @@ export default function Home() {
     })
     if (error) return alert(error.message)
 
-    // ✅ копилка — это тоже реальный уход денег → пишем в расходы
-    const { error: txErr } = await supabase.from('transactions').insert({
-      date: saveDate,
-      type: 'expense',
-      amount,
-      category: 'Копилка',
-      taxable_usn: null,
-      note: saveNote.trim() ? saveNote.trim() : null,
-    })
-    if (txErr) return alert('transactions insert (savings): ' + txErr.message)
-
     setSaveAmount('')
     setSaveNote('')
-    await Promise.all([loadSavingsEntries(), loadTransactions()])
+    await loadSavingsEntries()
   }
 
-  async function addRecommendedToday(savePerDayFromToday: number) {
-    const todayStr = toDateOnly(new Date())
-    const recommended = Math.max(0, Math.round(savePerDayFromToday))
+  async function saveReserveSettings() {
+    if (!reserveSettings) return alert('Настройки резерва не загрузились')
+    const targetMonthly = parseNumberLoose(reserveTargetMonthlyInput)
+    if (!Number.isFinite(targetMonthly) || targetMonthly < 0) return alert('Резерв/месяц должен быть числом >= 0')
 
-    if (recommended <= 0) {
-      alert('Сегодня ничего не требуется откладывать 👍')
-      return
-    }
+    const { data, error } = await supabase
+      .from('reserve_settings')
+      .update({ target_monthly: targetMonthly })
+      .eq('id', reserveSettings.id)
+      .select('*')
+      .single()
 
-    const ok = confirm(`Добавить в копилку сегодня ${money(recommended)}?\nДата: ${todayStr}`)
-    if (!ok) return
-
-    const { error } = await supabase.from('savings_entries').insert({
-      date: todayStr,
-      amount: recommended,
-      note: 'Рекомендовано системой',
-    })
     if (error) return alert(error.message)
-
-    // ✅ копилка = расход
-    const { error: txErr } = await supabase.from('transactions').insert({
-      date: todayStr,
-      type: 'expense',
-      amount: recommended,
-      category: 'Копилка',
-      taxable_usn: null,
-      note: 'Рекомендовано системой',
-    })
-    if (txErr) return alert('transactions insert (savings recommended): ' + txErr.message)
-
-    await Promise.all([loadSavingsEntries(), loadTransactions()])
+    setReserveSettings(data as ReserveSettings)
   }
 
-  function startEditTx(r: Transaction) {
-    setEditingTxId(r.id)
-    setTxEditDate(r.date)
-    setTxEditAmount(String(r.amount))
-    setTxEditCategory(r.category || '')
-    setTxEditNote(r.note || '')
-    setTxEditTaxable(Boolean(r.taxable_usn))
-  }
-
-  async function saveEditTx(r: Transaction) {
-    const amount = parseNumberLoose(txEditAmount)
+  async function addReserveEntry(e: React.FormEvent) {
+    e.preventDefault()
+    const amount = parseNumberLoose(reserveAmount)
     if (!Number.isFinite(amount) || amount <= 0) return alert('Некорректная сумма')
 
-    const payload: Partial<Transaction> = {
-      date: txEditDate,
+    const { error } = await supabase.from('reserve_entries').insert({
+      date: reserveDate,
       amount,
-      category: txEditCategory.trim() || (r.type === 'expense' ? 'Расход' : 'Доход'),
-      note: txEditNote.trim() ? txEditNote.trim() : null,
-    }
-    if (r.type === 'income') payload.taxable_usn = txEditTaxable
-
-    const { error } = await supabase.from('transactions').update(payload).eq('id', r.id)
+      note: reserveNote.trim() ? reserveNote.trim() : null,
+    })
     if (error) return alert(error.message)
 
-    setEditingTxId('')
-    await loadTransactions()
+    setReserveAmount('')
+    setReserveNote('')
+    await loadReserveEntries()
   }
-
-  async function deleteTx(r: Transaction) {
-    const ok = confirm(`Удалить операцию?\n${r.type === 'income' ? 'Доход' : 'Расход'} • ${r.category} • ${money(r.amount)} • ${r.date}`)
-    if (!ok) return
-
-    const { error } = await supabase.from('transactions').delete().eq('id', r.id)
-    if (error) return alert(error.message)
-
-    if (editingTxId === r.id) setEditingTxId('')
-    await loadTransactions()
-  }
-
-  function startEditSave(s: SavingsEntry) {
-    setEditingSaveId(s.id)
-    setSaveEditDate(s.date)
-    setSaveEditAmount(String(s.amount))
-    setSaveEditNote(s.note || '')
-  }
-
-  async function saveEditSave(s: SavingsEntry) {
-    const amount = parseNumberLoose(saveEditAmount)
-    if (!Number.isFinite(amount) || amount <= 0) return alert('Некорректная сумма')
-
-    const { error } = await supabase
-      .from('savings_entries')
-      .update({ date: saveEditDate, amount, note: saveEditNote.trim() ? saveEditNote.trim() : null })
-      .eq('id', s.id)
-
-    if (error) return alert(error.message)
-    setEditingSaveId('')
-    await loadSavingsEntries()
-    // ⚠️ transactions копилки мы не правим автоматически (иначе можно сломать историю),
-    // если нужно — скажи, добавлю связку “копилка_id -> transaction_id”.
-  }
-
-  async function deleteSave(s: SavingsEntry) {
-    const ok = confirm(`Удалить взнос в копилку?\n${s.date} • ${money(s.amount)}`)
-    if (!ok) return
-
-    const { error } = await supabase.from('savings_entries').delete().eq('id', s.id)
-    if (error) return alert(error.message)
-
-    if (editingSaveId === s.id) setEditingSaveId('')
-    await loadSavingsEntries()
-  }
-
-  /* ===================== CREDIT CARDS ===================== */
 
   async function submitCard(e: React.FormEvent) {
     e.preventDefault()
@@ -820,12 +858,12 @@ export default function Home() {
     const balance = parseNumberLoose(cardBalance)
     const statement_day = Number(cardStatementDay)
     const due_day = Number(cardDueDay)
-    const min_payment_rate = parseNumberLoose(cardMinRate) / 100
+    const min_payment_rate = parseNumberLoose(cardMinRate)
 
     if (!Number.isFinite(balance) || balance < 0) return alert('Баланс должен быть числом >= 0')
-    if (!Number.isFinite(statement_day) || statement_day < 1 || statement_day > 28) return alert('День выписки 1–28')
-    if (!Number.isFinite(due_day) || due_day < 1 || due_day > 28) return alert('День платежа 1–28')
-    if (!Number.isFinite(min_payment_rate) || min_payment_rate < 0 || min_payment_rate > 1) return alert('Минимальный платёж 0–100%')
+    if (!Number.isFinite(statement_day) || statement_day < 1 || statement_day > 28) return alert('Statement day 1–28')
+    if (!Number.isFinite(due_day) || due_day < 1 || due_day > 28) return alert('Due day 1–28')
+    if (!Number.isFinite(min_payment_rate) || min_payment_rate < 0 || min_payment_rate > 1) return alert('Min rate: 0..1 (например 0.05)')
 
     const { error } = await supabase.from('card_accounts').insert({
       title,
@@ -842,138 +880,93 @@ export default function Home() {
     await loadCards()
   }
 
-  async function deleteCard(card: CardAccount) {
-    const ok = confirm(`Удалить кредитку "${card.title}"?\nУдалятся и события (проценты/платежи).`)
-    if (!ok) return
-    const { error } = await supabase.from('card_accounts').delete().eq('id', card.id)
-    if (error) return alert(error.message)
-    await Promise.all([loadCards(), loadCardEvents()])
-  }
-
-  async function submitCardPayment(e: React.FormEvent) {
+  async function submitCardEvent(e: React.FormEvent) {
     e.preventDefault()
-    const card = cards.find(c => c.id === payCardId)
+    const card = cards.find(c => c.id === cardEventCardId)
     if (!card) return alert('Выбери кредитку')
 
-    const amount = parseNumberLoose(payCardAmount)
-    if (!Number.isFinite(amount) || amount <= 0) return alert('Некорректная сумма платежа')
+    const amount = parseNumberLoose(cardEventAmount)
+    if (!Number.isFinite(amount) || amount <= 0) return alert('Сумма должна быть > 0')
 
-    // card_event payment
-    const { error: insErr } = await supabase.from('card_events').insert({
+    // 1) пишем событие
+    const { error } = await supabase.from('card_events').insert({
       card_id: card.id,
-      date: payCardDate,
-      kind: 'payment',
+      date: cardEventDate,
+      kind: cardEventKind,
       amount,
-      note: payCardNote.trim() ? payCardNote.trim() : null,
+      note: cardEventNote.trim() ? cardEventNote.trim() : null,
     })
-    if (insErr) return alert(insErr.message)
+    if (error) return alert(error.message)
 
-    // update balance (debt decreases)
-    const newBalance = Math.max(0, Number(card.balance) - amount)
-    const { error: updErr } = await supabase.from('card_accounts').update({ balance: newBalance, active: newBalance > 0 }).eq('id', card.id)
+    // 2) обновляем баланс кредитки
+    const current = Number(card.balance)
+    const next =
+      cardEventKind === 'interest'
+        ? current + amount
+        : Math.max(0, current - amount)
+
+    const { error: updErr } = await supabase.from('card_accounts').update({ balance: next }).eq('id', card.id)
     if (updErr) return alert(updErr.message)
 
-    // ✅ payment is real expense
-    const { error: txErr } = await supabase.from('transactions').insert({
-      date: payCardDate,
-      type: 'expense',
-      amount,
-      category: `Кредитка: ${card.title}`,
-      taxable_usn: null,
-      note: payCardNote.trim() ? payCardNote.trim() : 'Платёж по кредитке',
-    })
-    if (txErr) return alert('transactions insert (card pay): ' + txErr.message)
+    // 3) если payment — это реальный расход денег → записываем в transactions
+    if (cardEventKind === 'payment') {
+      const category = `Кредитка: ${card.title}`
+      const noteMarker = `AUTO:card_payment:${card.id}`
+      await ensureAutoExpenseOnce(cardEventDate, amount, category, noteMarker)
+    }
 
-    setPayCardAmount('')
-    setPayCardNote('')
+    setCardEventAmount('')
+    setCardEventNote('')
     await Promise.all([loadCards(), loadCardEvents(), loadTransactions()])
   }
 
-  async function submitCardInterest(e: React.FormEvent) {
-    e.preventDefault()
-    const card = cards.find(c => c.id === intCardId)
-    if (!card) return alert('Выбери кредитку')
-
-    const amount = parseNumberLoose(intCardAmount)
-    if (!Number.isFinite(amount) || amount <= 0) return alert('Некорректная сумма процентов')
-
-    const { error: insErr } = await supabase.from('card_events').insert({
-      card_id: card.id,
-      date: intCardDate,
-      kind: 'interest',
-      amount,
-      note: intCardNote.trim() ? intCardNote.trim() : null,
-    })
-    if (insErr) return alert(insErr.message)
-
-    // interest increases debt
-    const newBalance = Number(card.balance) + amount
-    const { error: updErr } = await supabase.from('card_accounts').update({ balance: newBalance, active: true }).eq('id', card.id)
-    if (updErr) return alert(updErr.message)
-
-    // ⚠️ interest is NOT expense (это начисление долга, денег не ушло)
-    setIntCardAmount('')
-    setIntCardNote('')
-    await Promise.all([loadCards(), loadCardEvents()])
-  }
-
-  /* ===================== DEFAULT SELECTS ===================== */
-
+  // default selectors
   useEffect(() => {
     if (!payLoanId && loans.some(l => l.active)) setPayLoanId(loans.find(l => l.active)?.id || '')
   }, [loans, payLoanId])
 
   useEffect(() => {
-    if (!payCardId && cards.some(c => c.active)) setPayCardId(cards.find(c => c.active)?.id || '')
-    if (!intCardId && cards.some(c => c.active)) setIntCardId(cards.find(c => c.active)?.id || '')
-  }, [cards, payCardId, intCardId])
+    if (!cardEventCardId && cards.some(c => c.active)) setCardEventCardId(cards.find(c => c.active)?.id || '')
+  }, [cards, cardEventCardId])
 
-  /* ===================== CALCULATIONS ===================== */
+  // ---------- calculations (теперь по выбранному месяцу) ----------
+  const monthKey = selectedMonth
+  const yearKey = monthKey.slice(0, 4)
 
-  const now = new Date()
-  const currentMonth = now.toISOString().slice(0, 7)
-  const currentYear = now.toISOString().slice(0, 4)
-
-  const headerMonthYear = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(now)
   const headerToday = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(now)
 
   const incomeMonth = useMemo(
-    () => rows.filter(r => r.type === 'income' && r.date.startsWith(currentMonth)).reduce((s, r) => s + Number(r.amount), 0),
-    [rows, currentMonth]
+    () => rows.filter(r => r.type === 'income' && r.date.startsWith(monthKey)).reduce((s, r) => s + Number(r.amount), 0),
+    [rows, monthKey]
   )
 
-  const expenseMonthOnly = useMemo(
-    () => rows.filter(r => r.type === 'expense' && r.date.startsWith(currentMonth)).reduce((s, r) => s + Number(r.amount), 0),
-    [rows, currentMonth]
+  const expenseMonth = useMemo(
+    () => rows.filter(r => r.type === 'expense' && r.date.startsWith(monthKey)).reduce((s, r) => s + Number(r.amount), 0),
+    [rows, monthKey]
   )
-
-  // ✅ теперь “расход месяца” — это все реальные расходы из transactions (включая кредиты/кредитки/налоги/копилку)
-  const expenseMonthReal = expenseMonthOnly
 
   const taxableIncomeMonth = useMemo(
     () =>
       rows
-        .filter(r => r.type === 'income' && r.taxable_usn === true && r.date.startsWith(currentMonth))
+        .filter(r => r.type === 'income' && r.taxable_usn === true && r.date.startsWith(monthKey))
         .reduce((s, r) => s + Number(r.amount), 0),
-    [rows, currentMonth]
+    [rows, monthKey]
   )
 
+  // для ИП 1% считаем по году выбранного месяца
   const taxableIncomeYear = useMemo(
     () =>
       rows
-        .filter(r => r.type === 'income' && r.taxable_usn === true && r.date.startsWith(currentYear))
+        .filter(r => r.type === 'income' && r.taxable_usn === true && r.date.startsWith(yearKey))
         .reduce((s, r) => s + Number(r.amount), 0),
-    [rows, currentYear]
+    [rows, yearKey]
   )
 
-  // ✅ УСН резерв — это “резерв”, но если ты уже оплатила, это уйдёт в expenses через ip_payments->transactions.
+  // ✅ важное: УСН резерв считаем от дохода месяца
   const usnReserve = taxableIncomeMonth * 0.06
 
-  // planned obligations (плановые)
-  const loansPlannedMonth = useMemo(
-    () => loans.filter(l => l.active).reduce((s, l) => s + Number(l.monthly_payment), 0),
-    [loans]
-  )
+  // кредиты плановые (на будущее) — но они НЕ должны уменьшать “реальный остаток сейчас”
+  const loansPlannedMonth = useMemo(() => loans.filter(l => l.active).reduce((s, l) => s + Number(l.monthly_payment), 0), [loans])
 
   // IP 1% сверх 300к в год
   const annualFixed = Number(ipSettings?.annual_fixed ?? 0)
@@ -982,136 +975,143 @@ export default function Home() {
   const extraBaseYear = Math.max(0, taxableIncomeYear - thresholdYear)
   const extraDueYear = extraBaseYear * extraRate
   const ipDueYear = annualFixed + extraDueYear
-  const ipPaidYear = ipPayments.filter(p => p.date.startsWith(currentYear)).reduce((s, p) => s + Number(p.amount), 0)
+
+  // сколько уплачено в выбранном году
+  const ipPaidYear = ipPayments.filter(p => p.date.startsWith(yearKey)).reduce((s, p) => s + Number(p.amount), 0)
   const ipRemainingYear = Math.max(0, ipDueYear - ipPaidYear)
 
-  const monthIndex = now.getMonth() + 1
+  // reserve month remaining logic (если хочешь распределять остаток года)
+  const monthIndex = new Date(monthKey + '-01T00:00:00').getMonth() + 1
   const monthsLeft = Math.max(1, 12 - monthIndex + 1)
   const ipReserveMonth = ipRemainingYear / monthsLeft
 
   // savings totals
   const totalSavedAll = useMemo(() => savingsEntries.reduce((s, e) => s + Number(e.amount), 0), [savingsEntries])
   const savedThisMonth = useMemo(
-    () => savingsEntries.filter(e => e.date.startsWith(currentMonth)).reduce((s, e) => s + Number(e.amount), 0),
-    [savingsEntries, currentMonth]
+    () => savingsEntries.filter(e => e.date.startsWith(monthKey)).reduce((s, e) => s + Number(e.amount), 0),
+    [savingsEntries, monthKey]
   )
 
   const goal = Number(savingsSettings?.goal_amount ?? 1000000)
   const targetMonthly = Number(savingsSettings?.target_monthly ?? 0)
-
   const remainingToGoal = Math.max(0, goal - totalSavedAll)
   const goalPct = goal > 0 ? (totalSavedAll / goal) * 100 : 0
   const estMonths = targetMonthly > 0 ? Math.ceil(remainingToGoal / targetMonthly) : null
 
-  // days in month + daily recommendations
-  const y = now.getFullYear()
-  const m0 = now.getMonth()
-  const daysInMonth = new Date(y, m0 + 1, 0).getDate()
-  const dayOfMonth = now.getDate()
-  const daysLeftInMonth = Math.max(1, daysInMonth - dayOfMonth + 1)
+  // reserve totals
+  const reserveTotalAll = useMemo(() => reserveEntries.reduce((s, e) => s + Number(e.amount), 0), [reserveEntries])
+  const reserveThisMonth = useMemo(
+    () => reserveEntries.filter(e => e.date.startsWith(monthKey)).reduce((s, e) => s + Number(e.amount), 0),
+    [reserveEntries, monthKey]
+  )
+  const reserveTargetMonthly = Number(reserveSettings?.target_monthly ?? 0)
 
+  // planned income overrides
   const rawPlanned = parseNumberLoose(plannedIncomeMonth)
   const baseIncomeForTips = Number.isFinite(rawPlanned) && rawPlanned > 0 ? rawPlanned : incomeMonth
 
-  /**
-   * ✅ ИДЕЯ: “лимиты” строим так:
-   * - Берем доход для расчёта
-   * - Минус “резервы” (УСН + ИП резерв + плановые кредиты + цель копилки)
-   * => получаем допустимые траты в месяц
-   * - Потом сравниваем с ФАКТИЧЕСКИМИ тратами (expenseMonthReal)
-   */
-  const spendableMonthBeforeSaving = Math.max(0, baseIncomeForTips - usnReserve - loansPlannedMonth - ipReserveMonth)
-  const allowedSpendMonth = Math.max(0, spendableMonthBeforeSaving - targetMonthly)
+  // ✅ Реальный остаток сейчас: доход - расходы - копилка - резерв
+  const realBalanceNow = incomeMonth - expenseMonth - savedThisMonth - reserveThisMonth
+
+  // рекомендации трат: из “дохода для расчёта” вычитаем резервы/копилки
+  const spendableMonthBeforeSaving = Math.max(0, baseIncomeForTips - usnReserve - ipReserveMonth)
+  const allowedSpendMonth = Math.max(0, spendableMonthBeforeSaving - targetMonthly - reserveTargetMonthly)
+
+  // daily
+  const d = new Date(monthKey + '-01T00:00:00')
+  const y = d.getFullYear()
+  const m0 = d.getMonth()
+  const daysInMonth = new Date(y, m0 + 1, 0).getDate()
+
+  const todayDate = new Date()
+  const isCurrentMonth = monthKey === currentMonth
+  const dayOfMonth = isCurrentMonth ? todayDate.getDate() : 1
+  const daysLeftInMonth = Math.max(1, daysInMonth - dayOfMonth + 1)
 
   const avgSpendPerDay = allowedSpendMonth / daysInMonth
-  const remainingSpendMonth = allowedSpendMonth - expenseMonthReal
+  const remainingSpendMonth = allowedSpendMonth - expenseMonth
   const allowedSpendPerDayFromToday = remainingSpendMonth / daysLeftInMonth
 
   const remainingSaveThisMonth = Math.max(0, targetMonthly - savedThisMonth)
   const savePerDayFromToday = remainingSaveThisMonth / daysLeftInMonth
   const avgSavePerDay = targetMonthly / daysInMonth
 
-  // ✅ “Остаток сейчас” = доход - фактические расходы (все, что реально ушло)
-  const freeNow = incomeMonth - expenseMonthReal
+  // фильтр операций по месяцу
+  const rowsMonth = useMemo(() => rows.filter(r => r.date.startsWith(monthKey)), [rows, monthKey])
 
-  // ✅ “Свободно после трат+обязательного+копилки” — прогноз (резервы ещё не фактические)
-  const freeMoneyForecast = incomeMonth - expenseMonthReal - usnReserve - loansPlannedMonth - ipReserveMonth - savedThisMonth
-
-  /* ===================== RENDER ===================== */
-
+  // ---------- UI ----------
   return (
     <main style={ui.page}>
       <div style={ui.headerRow}>
         <div style={{ minWidth: 0 }}>
-          <h1 style={ui.h1}>Финансы Карина — контроль трат + копилка</h1>
+          <h1 style={ui.h1}>Финансы Карина</h1>
           <div style={ui.sub}>
-            Сейчас: <b style={{ textTransform: 'capitalize' }}>{headerMonthYear}</b> • Сегодня: <b>{headerToday}</b>
+            Месяц: <b style={{ textTransform: 'capitalize' }}>{monthLabel(monthKey)}</b> • Сегодня: <b>{headerToday}</b>
           </div>
         </div>
 
-        <button onClick={loadAll} disabled={loading} style={{ ...ui.btnPrimary, opacity: loading ? 0.6 : 1 }}>
-          {loading ? 'Обновляю…' : 'Обновить'}
-        </button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{ ...ui.select, width: 220 }}>
+            {availableMonths.length === 0 ? <option value={currentMonth}>{monthLabel(currentMonth)}</option> : null}
+            {availableMonths.map(m => (
+              <option key={m} value={m}>{monthLabel(m)}</option>
+            ))}
+          </select>
+
+          <button onClick={loadAll} disabled={loading} style={{ ...ui.btnPrimary, opacity: loading ? 0.6 : 1 }}>
+            {loading ? 'Обновляю…' : 'Обновить'}
+          </button>
+        </div>
       </div>
 
-      {/* TIPS */}
+      {/* SUMMARY */}
       <section style={{ ...ui.card, marginTop: 14 }}>
-        <div style={{ ...ui.row, alignItems: 'flex-start' }}>
-          <div style={{ flex: '2 1 520px', minWidth: 260 }}>
-            <div style={{ ...ui.cardTitle, marginBottom: 8 }}>🧠 Рекомендации на месяц (чтобы накопить)</div>
+        <div style={ui.cardTitle}>🧠 Рекомендации на месяц (чтобы накопить)</div>
 
-            <div style={{ ...ui.row, marginBottom: 8 }}>
-              <span style={ui.pill}>Доход (месяц): <b>{money(incomeMonth)}</b></span>
-              <span style={ui.pill}>Расход (месяц): <b>{money(expenseMonthReal)}</b></span>
-              <span style={ui.pill}>Остаток сейчас: <b>{money(freeNow)}</b></span>
-            </div>
+        <div style={{ ...ui.row, marginBottom: 10 }}>
+          <span style={ui.pill}>Доход (месяц): <b>{money(incomeMonth)}</b></span>
+          <span style={ui.pill}>Расход (месяц): <b>{money(expenseMonth)}</b></span>
+          <span style={ui.pill}>Копилка (месяц): <b>{money(savedThisMonth)}</b></span>
+          <span style={ui.pill}>Резерв (месяц): <b>{money(reserveThisMonth)}</b></span>
+          <span style={ui.pill}>Остаток сейчас (реальный): <b>{money(realBalanceNow)}</b></span>
+        </div>
 
-            <div style={{ ...ui.row, marginBottom: 8 }}>
-              <span style={ui.pill}>Доход для расчёта: <b>{money(baseIncomeForTips)}</b></span>
-              <span style={ui.pill}>
-                Обязательное: УСН {money(usnReserve)} • кредиты {money(loansPlannedMonth)} • взносы {money(ipReserveMonth)}
-              </span>
-            </div>
+        <div style={{ ...ui.row, marginBottom: 8 }}>
+          <span style={ui.pill}>Доход для расчёта: <b>{money(baseIncomeForTips)}</b></span>
+          <span style={ui.pill}>
+            Обязательное (план): УСН {money(usnReserve)} • кредиты {money(loansPlannedMonth)} • взносы {money(ipReserveMonth)}
+          </span>
+        </div>
 
-            <div style={{ opacity: 0.9, lineHeight: 1.5 }}>
-              <div>
-                Хочешь отложить в месяц: <b>{money(targetMonthly)}</b> (в этом месяце уже: <b>{money(savedThisMonth)}</b>)
-              </div>
-
-              <div style={{ marginTop: 6 }}>
-                Тогда траты в месяц должны быть не больше: <b>{money(allowedSpendMonth)}</b>
-              </div>
-
-              <div style={{ marginTop: 6 }}>
-                ✅ Средний лимит трат в день: <b>{money(avgSpendPerDay)}</b>
-              </div>
-
-              <div style={{ marginTop: 6 }}>
-                ✅ Лимит трат “сегодня и дальше” (на остаток месяца): <b>{money(allowedSpendPerDayFromToday)}</b>
-              </div>
-
-              <div style={ui.divider} />
-
-              <div>
-                Чтобы выполнить накопление: в среднем <b>{money(avgSavePerDay)}</b> в день
-              </div>
-              <div style={{ marginTop: 6 }}>
-                Чтобы добить план в этом месяце: с сегодняшнего дня по <b>{money(savePerDayFromToday)}</b> в день
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <button onClick={() => addRecommendedToday(savePerDayFromToday)} style={{ ...ui.btnPrimary, width: '100%' }}>
-                  ➕ Внести сегодня рекомендованную сумму ({money(Math.round(savePerDayFromToday))})
-                </button>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                Свободно (после трат, обязательного и копилки): <b>{money(freeMoneyForecast)}</b>
-              </div>
-            </div>
+        <div style={{ opacity: 0.92, lineHeight: 1.5 }}>
+          <div>
+            Хочешь отложить в месяц: <b>{money(targetMonthly)}</b> + резерв <b>{money(reserveTargetMonthly)}</b>
           </div>
 
-          <div style={{ flex: '1 1 320px', minWidth: 260, maxWidth: 420 }}>
+          <div style={{ marginTop: 6 }}>
+            Тогда траты в месяц должны быть не больше: <b>{money(allowedSpendMonth)}</b>
+          </div>
+
+          <div style={{ marginTop: 6 }}>
+            ✅ Средний лимит трат в день: <b>{money(avgSpendPerDay)}</b>
+          </div>
+
+          <div style={{ marginTop: 6 }}>
+            ✅ Лимит трат “сегодня и дальше”: <b>{money(allowedSpendPerDayFromToday)}</b>
+          </div>
+
+          <div style={ui.divider} />
+
+          <div>
+            Чтобы выполнить копилку: в среднем <b>{money(avgSavePerDay)}</b> в день
+          </div>
+          <div style={{ marginTop: 6 }}>
+            Чтобы добить копилку в этом месяце: <b>{money(savePerDayFromToday)}</b> в день
+          </div>
+        </div>
+
+        <div style={{ ...ui.cards, marginTop: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+          <div>
             <div style={{ ...ui.cardTitle, marginBottom: 8 }}>План дохода на месяц</div>
             <input
               style={ui.input}
@@ -1119,13 +1119,15 @@ export default function Home() {
               onChange={e => setPlannedIncomeMonth(e.target.value)}
               placeholder="например 600000"
             />
-            <div style={{ ...ui.small, marginTop: 6 }}>Если пусто — считаю по факту доходов.</div>
+            <div style={{ ...ui.small, marginTop: 6 }}>
+              Если пусто — считаю по факту доходов.
+            </div>
           </div>
         </div>
       </section>
 
       <div style={ui.grid}>
-        {/* Savings */}
+        {/* Savings + Reserve */}
         <section style={ui.card}>
           <div style={{ ...ui.row, alignItems: 'flex-start' }}>
             <div style={{ flex: '2 1 520px', minWidth: 260 }}>
@@ -1150,12 +1152,32 @@ export default function Home() {
                   <input style={ui.input} value={goalInput} onChange={e => setGoalInput(e.target.value)} placeholder="1000000" />
                 </div>
                 <div>
-                  <div style={{ ...ui.small, marginBottom: 6 }}>Хочу откладывать в месяц (₽)</div>
+                  <div style={{ ...ui.small, marginBottom: 6 }}>Копилка в месяц (₽)</div>
                   <input style={ui.input} value={targetMonthlyInput} onChange={e => setTargetMonthlyInput(e.target.value)} placeholder="например 50000" />
                 </div>
                 <div style={{ alignSelf: 'end' }}>
                   <button style={{ ...ui.btnPrimary, width: '100%' }} onClick={saveSavingsSettings}>
-                    Сохранить настройки копилки
+                    Сохранить копилку
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ ...ui.divider, marginTop: 14 }} />
+
+              <div style={ui.cardTitle}>🧱 Резерв (подушка/буфер)</div>
+              <div style={{ ...ui.row, marginBottom: 10 }}>
+                <span style={ui.pill}>Резерв всего: <b>{money(reserveTotalAll)}</b></span>
+                <span style={ui.pill}>Резерв за месяц: <b>{money(reserveThisMonth)}</b></span>
+              </div>
+
+              <div style={{ ...ui.cards, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                <div>
+                  <div style={{ ...ui.small, marginBottom: 6 }}>Резерв/месяц (₽)</div>
+                  <input style={ui.input} value={reserveTargetMonthlyInput} onChange={e => setReserveTargetMonthlyInput(e.target.value)} placeholder="например 30000" />
+                </div>
+                <div style={{ alignSelf: 'end' }}>
+                  <button style={{ ...ui.btnPrimary, width: '100%' }} onClick={saveReserveSettings}>
+                    Сохранить резерв
                   </button>
                 </div>
               </div>
@@ -1169,6 +1191,16 @@ export default function Home() {
                 <input style={ui.input} value={saveNote} onChange={e => setSaveNote(e.target.value)} placeholder="Комментарий (необязательно)" />
                 <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить взнос</button>
               </form>
+
+              <div style={ui.divider} />
+
+              <div style={ui.cardTitle}>➕ Внести в резерв</div>
+              <form onSubmit={addReserveEntry} style={{ display: 'grid', gap: 8 }}>
+                <input type="date" style={ui.input as any} value={reserveDate} onChange={e => setReserveDate(e.target.value)} />
+                <input style={ui.input} value={reserveAmount} onChange={e => setReserveAmount(e.target.value)} placeholder="Сумма, ₽" />
+                <input style={ui.input} value={reserveNote} onChange={e => setReserveNote(e.target.value)} placeholder="Комментарий (необязательно)" />
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить в резерв</button>
+              </form>
             </div>
           </div>
         </section>
@@ -1177,15 +1209,10 @@ export default function Home() {
         <section style={ui.card}>
           <div style={ui.cardTitle}>Добавление (доход / расход / кредиты / кредитки)</div>
 
-          <datalist id="income-cats">
-            {incomeCategories.map(c => <option key={c} value={c} />)}
-          </datalist>
-          <datalist id="expense-cats">
-            {expenseCategories.map(c => <option key={c} value={c} />)}
-          </datalist>
+          <datalist id="income-cats">{incomeCategories.map(c => <option key={c} value={c} />)}</datalist>
+          <datalist id="expense-cats">{expenseCategories.map(c => <option key={c} value={c} />)}</datalist>
 
           <div style={ui.cards}>
-            {/* INCOME */}
             <form onSubmit={submitIncome} style={ui.card}>
               <div style={ui.cardTitle}>+ Доход</div>
               <div style={{ display: 'grid', gap: 8 }}>
@@ -1201,7 +1228,6 @@ export default function Home() {
               </div>
             </form>
 
-            {/* EXPENSE */}
             <form onSubmit={submitExpense} style={ui.card}>
               <div style={ui.cardTitle}>- Расход</div>
               <div style={{ display: 'grid', gap: 8 }}>
@@ -1213,7 +1239,6 @@ export default function Home() {
               </div>
             </form>
 
-            {/* LOAN ADD */}
             <form onSubmit={submitLoan} style={ui.card}>
               <div style={ui.cardTitle}>+ Кредит</div>
               <div style={{ display: 'grid', gap: 8 }}>
@@ -1226,23 +1251,8 @@ export default function Home() {
                 </div>
                 <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить кредит</button>
               </div>
-
-              {loans.length > 0 ? (
-                <>
-                  <div style={ui.divider} />
-                  <div style={{ ...ui.small, marginBottom: 6 }}>Удаление кредитов</div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    {loans.slice(0, 6).map(l => (
-                      <button key={l.id} type="button" style={ui.btn} onClick={() => deleteLoan(l)}>
-                        Удалить: {l.title}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
             </form>
 
-            {/* LOAN PAYMENT */}
             <form onSubmit={submitLoanPayment} style={ui.card}>
               <div style={ui.cardTitle}>Отметить платёж по кредиту</div>
               <div style={{ display: 'grid', gap: 8 }}>
@@ -1256,166 +1266,202 @@ export default function Home() {
                 </select>
                 <input type="date" value={payLoanDate} onChange={e => setPayLoanDate(e.target.value)} style={ui.input as any} />
                 <input value={payLoanAmount} onChange={e => setPayLoanAmount(e.target.value)} placeholder="Сумма платежа, ₽" style={ui.input} />
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Сохранить платёж</button>
-              </div>
-              <div style={{ ...ui.small, marginTop: 8 }}>
-                Платёж автоматически записывается в расходы (transactions).
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Сохранить платёж (в т.ч. в расход)</button>
               </div>
             </form>
 
-            {/* CARD ADD */}
             <form onSubmit={submitCard} style={ui.card}>
               <div style={ui.cardTitle}>+ Кредитка</div>
               <div style={{ display: 'grid', gap: 8 }}>
-                <input value={cardTitle} onChange={e => setCardTitle(e.target.value)} placeholder="Название (Сбер / Тинькофф…)" style={ui.input} />
-                <input value={cardBalance} onChange={e => setCardBalance(e.target.value)} placeholder="Долг сейчас, ₽ (можно 0)" style={ui.input} />
+                <input value={cardTitle} onChange={e => setCardTitle(e.target.value)} placeholder="Название (Tinkoff Platinum…)" style={ui.input} />
+                <input value={cardBalance} onChange={e => setCardBalance(e.target.value)} placeholder="Текущий долг, ₽ (можно 0)" style={ui.input} />
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <input value={cardStatementDay} onChange={e => setCardStatementDay(e.target.value)} placeholder="День выписки (1–28)" style={ui.input} />
-                  <input value={cardDueDay} onChange={e => setCardDueDay(e.target.value)} placeholder="День платежа (1–28)" style={ui.input} />
+                  <input value={cardStatementDay} onChange={e => setCardStatementDay(e.target.value)} placeholder="Statement day (1–28)" style={ui.input} />
+                  <input value={cardDueDay} onChange={e => setCardDueDay(e.target.value)} placeholder="Due day (1–28)" style={ui.input} />
                 </div>
-                <input value={cardMinRate} onChange={e => setCardMinRate(e.target.value)} placeholder="Мин платёж, % (например 5)" style={ui.input} />
+                <input value={cardMinRate} onChange={e => setCardMinRate(e.target.value)} placeholder="Min pay rate (0.05)" style={ui.input} />
                 <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Добавить кредитку</button>
               </div>
-
-              {cards.length > 0 ? (
-                <>
-                  <div style={ui.divider} />
-                  <div style={{ ...ui.small, marginBottom: 6 }}>Удаление кредиток</div>
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    {cards.slice(0, 6).map(c => (
-                      <button key={c.id} type="button" style={ui.btn} onClick={() => deleteCard(c)}>
-                        Удалить: {c.title}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
             </form>
 
-            {/* CARD PAYMENT */}
-            <form onSubmit={submitCardPayment} style={ui.card}>
-              <div style={ui.cardTitle}>Платёж по кредитке</div>
+            <form onSubmit={submitCardEvent} style={ui.card}>
+              <div style={ui.cardTitle}>Кредитка: событие (проценты / платёж)</div>
               <div style={{ display: 'grid', gap: 8 }}>
-                <select value={payCardId} onChange={e => setPayCardId(e.target.value)} style={ui.select}>
+                <select value={cardEventCardId} onChange={e => setCardEventCardId(e.target.value)} style={ui.select}>
                   <option value="">— выбери кредитку —</option>
                   {cards.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.title} • долг {Math.round(c.balance)}₽
+                      {c.title} {c.active ? '' : '(закрыта)'}
                     </option>
                   ))}
                 </select>
-                <input type="date" value={payCardDate} onChange={e => setPayCardDate(e.target.value)} style={ui.input as any} />
-                <input value={payCardAmount} onChange={e => setPayCardAmount(e.target.value)} placeholder="Сумма платежа, ₽" style={ui.input} />
-                <input value={payCardNote} onChange={e => setPayCardNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Сохранить платёж</button>
-              </div>
-              <div style={{ ...ui.small, marginTop: 8 }}>
-                Платёж автоматически пишется и в расходы (transactions).
-              </div>
-            </form>
 
-            {/* CARD INTEREST */}
-            <form onSubmit={submitCardInterest} style={ui.card}>
-              <div style={ui.cardTitle}>Начислить проценты по кредитке</div>
-              <div style={{ display: 'grid', gap: 8 }}>
-                <select value={intCardId} onChange={e => setIntCardId(e.target.value)} style={ui.select}>
-                  <option value="">— выбери кредитку —</option>
-                  {cards.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.title} • долг {Math.round(c.balance)}₽
-                    </option>
-                  ))}
+                <select value={cardEventKind} onChange={e => setCardEventKind(e.target.value as any)} style={ui.select}>
+                  <option value="payment">Платёж (уменьшает долг + пишет расход)</option>
+                  <option value="interest">Начисление процентов (увеличивает долг)</option>
                 </select>
-                <input type="date" value={intCardDate} onChange={e => setIntCardDate(e.target.value)} style={ui.input as any} />
-                <input value={intCardAmount} onChange={e => setIntCardAmount(e.target.value)} placeholder="Сумма процентов, ₽" style={ui.input} />
-                <input value={intCardNote} onChange={e => setIntCardNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
-                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Начислить</button>
-              </div>
-              <div style={{ ...ui.small, marginTop: 8 }}>
-                Проценты увеличивают долг, но не являются расходом денег.
+
+                <input type="date" value={cardEventDate} onChange={e => setCardEventDate(e.target.value)} style={ui.input as any} />
+                <input value={cardEventAmount} onChange={e => setCardEventAmount(e.target.value)} placeholder="Сумма, ₽" style={ui.input} />
+                <input value={cardEventNote} onChange={e => setCardEventNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
+
+                <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>
+                  Сохранить событие
+                </button>
               </div>
             </form>
 
-            {/* IP PAYMENTS */}
             <form onSubmit={submitIpPayment} style={ui.card}>
-              <div style={ui.cardTitle}>Оплата налогов / взносов</div>
+              <div style={ui.cardTitle}>ИП: оплатить (и записать как расход)</div>
               <div style={{ display: 'grid', gap: 8 }}>
                 <input type="date" value={ipPayDate} onChange={e => setIpPayDate(e.target.value)} style={ui.input as any} />
                 <input value={ipPayAmount} onChange={e => setIpPayAmount(e.target.value)} placeholder="Сумма, ₽" style={ui.input} />
                 <select value={ipPayKind} onChange={e => setIpPayKind(e.target.value as any)} style={ui.select}>
-                  <option value="any">любое</option>
-                  <option value="fixed">фиксированные</option>
+                  <option value="any">Любое</option>
+                  <option value="fixed">Фикс</option>
                   <option value="extra">1% сверх</option>
                 </select>
-                <input value={ipPayNote} onChange={e => setIpPayNote(e.target.value)} placeholder="Комментарий (необязательно)" style={ui.input} />
+                <input value={ipPayNote} onChange={e => setIpPayNote(e.target.value)} placeholder="Комментарий" style={ui.input} />
                 <button type="submit" style={{ ...ui.btnPrimary, width: '100%' }}>Сохранить оплату</button>
               </div>
             </form>
           </div>
+
+          <div style={ui.divider} />
+
+          <div style={{ ...ui.row, justifyContent: 'space-between' }}>
+            <div style={{ fontWeight: 900 }}>Кредитки (текущие долги)</div>
+            <div style={ui.small}>Платёж по кредитке создаёт расход автоматически.</div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+            {cards.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>Пока нет кредиток.</div>
+            ) : (
+              cards.map(c => (
+                <div key={c.id} style={{ padding: 12, borderRadius: 14, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(0,0,0,0.22)' }}>
+                  <div style={ui.row}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <b>{c.title}</b>
+                      <div style={ui.small}>
+                        Долг: <b>{money(Number(c.balance))}</b> • statement {c.statement_day} • due {c.due_day} • min {Math.round(Number(c.min_payment_rate) * 100)}%
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: 900 }}>{money(Number(c.balance))}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </section>
 
-        {/* Transactions list */}
+        {/* Transactions list by month */}
         <section style={ui.card}>
-          <div style={ui.cardTitle}>Операции (редактирование + даты)</div>
+          <div style={ui.cardTitle}>Операции за {monthLabel(monthKey)}</div>
 
           <div style={{ display: 'grid', gap: 8 }}>
-            {rows.map(r => {
-              const isEditing = editingTxId === r.id
-              const catsId = r.type === 'income' ? 'income-cats' : 'expense-cats'
+            {rowsMonth.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>Пока нет операций в этом месяце.</div>
+            ) : (
+              rowsMonth.map(r => {
+                const isEditing = editingTxId === r.id
+                const catsId = r.type === 'income' ? 'income-cats' : 'expense-cats'
 
-              return (
-                <div
-                  key={r.id}
-                  style={{
-                    padding: 12,
-                    borderRadius: 14,
-                    border: '1px solid rgba(255,255,255,0.10)',
-                    background: 'rgba(0,0,0,0.22)',
-                  }}
-                >
-                  {!isEditing ? (
-                    <div style={{ ...ui.row, alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <b>{r.type === 'expense' ? 'Расход' : 'Доход'}</b> • <span style={{ wordBreak: 'break-word' }}>{r.category}</span>{' '}
-                        {r.type === 'income' && r.taxable_usn ? '• УСН' : ''}
-                        {r.note ? <span style={{ opacity: 0.7 }}> • {r.note}</span> : null}
-                        <div style={ui.small}>
-                          Дата операции: <b>{r.date}</b> • Добавлено: {fmtDateTimeRu(r.created_at)}
+                function startEditTxLocal() {
+                  setEditingTxId(r.id)
+                  setTxEditDate(r.date)
+                  setTxEditAmount(String(r.amount))
+                  setTxEditCategory(r.category || '')
+                  setTxEditNote(r.note || '')
+                  setTxEditTaxable(Boolean(r.taxable_usn))
+                }
+
+                async function saveEditTxLocal() {
+                  const amount = parseNumberLoose(txEditAmount)
+                  if (!Number.isFinite(amount) || amount <= 0) return alert('Некорректная сумма')
+
+                  const payload: Partial<Transaction> = {
+                    date: txEditDate,
+                    amount,
+                    category: txEditCategory.trim() || (r.type === 'expense' ? 'Расход' : 'Доход'),
+                    note: txEditNote.trim() ? txEditNote.trim() : null,
+                  }
+                  if (r.type === 'income') payload.taxable_usn = txEditTaxable
+
+                  const { error } = await supabase.from('transactions').update(payload).eq('id', r.id)
+                  if (error) return alert(error.message)
+
+                  setEditingTxId('')
+                  await loadTransactions()
+                }
+
+                async function deleteTxLocal() {
+                  const ok = confirm(`Удалить операцию?\n${r.type === 'income' ? 'Доход' : 'Расход'} • ${r.category} • ${money(r.amount)} • ${r.date}`)
+                  if (!ok) return
+
+                  const { error } = await supabase.from('transactions').delete().eq('id', r.id)
+                  if (error) return alert(error.message)
+
+                  if (editingTxId === r.id) setEditingTxId('')
+                  await loadTransactions()
+                }
+
+                return (
+                  <div
+                    key={r.id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 14,
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      background: 'rgba(0,0,0,0.22)',
+                    }}
+                  >
+                    {!isEditing ? (
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ flex: '1 1 360px', minWidth: 240 }}>
+                          <b>{r.type === 'expense' ? 'Расход' : 'Доход'}</b> • {r.category} {r.type === 'income' && r.taxable_usn ? '• УСН' : ''}
+                          {r.note ? <span style={{ opacity: 0.7 }}> • {r.note}</span> : null}
+                          <div style={ui.small}>
+                            Дата: <b>{r.date}</b> • Добавлено: {fmtDateTimeRu(r.created_at)}
+                          </div>
+                        </div>
+
+                        <div style={{ fontWeight: 900, flex: '0 0 auto' }}>{money(r.amount)}</div>
+
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button style={ui.btn} onClick={startEditTxLocal}>Редактировать</button>
+                          <button style={ui.btn} onClick={deleteTxLocal}>Удалить</button>
                         </div>
                       </div>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                          Редактирование: {r.type === 'expense' ? 'расход' : 'доход'}
+                        </div>
 
-                      <div style={{ fontWeight: 900, whiteSpace: 'nowrap' }}>{money(r.amount)}</div>
-                      <button style={ui.btn} onClick={() => startEditTx(r)}>Редактировать</button>
-                      <button style={ui.btn} onClick={() => deleteTx(r)}>Удалить</button>
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{ fontWeight: 900, marginBottom: 8 }}>
-                        Редактирование: {r.type === 'expense' ? 'расход' : 'доход'}
-                      </div>
+                        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                          <input type="date" value={txEditDate} onChange={e => setTxEditDate(e.target.value)} style={ui.input as any} />
+                          <input value={txEditAmount} onChange={e => setTxEditAmount(e.target.value)} placeholder="Сумма" style={ui.input} />
+                          <input list={catsId} value={txEditCategory} onChange={e => setTxEditCategory(e.target.value)} placeholder="Категория" style={ui.input} />
+                          <input value={txEditNote} onChange={e => setTxEditNote(e.target.value)} placeholder="Комментарий" style={ui.input} />
+                          {r.type === 'income' ? (
+                            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
+                              <input type="checkbox" checked={txEditTaxable} onChange={e => setTxEditTaxable(e.target.checked)} />
+                              Облагается УСН 6%
+                            </label>
+                          ) : null}
+                        </div>
 
-                      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-                        <input type="date" value={txEditDate} onChange={e => setTxEditDate(e.target.value)} style={ui.input as any} />
-                        <input value={txEditAmount} onChange={e => setTxEditAmount(e.target.value)} placeholder="Сумма" style={ui.input} />
-                        <input list={catsId} value={txEditCategory} onChange={e => setTxEditCategory(e.target.value)} placeholder="Категория" style={ui.input} />
-                        <input value={txEditNote} onChange={e => setTxEditNote(e.target.value)} placeholder="Комментарий" style={ui.input} />
-                        {r.type === 'income' ? (
-                          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
-                            <input type="checkbox" checked={txEditTaxable} onChange={e => setTxEditTaxable(e.target.checked)} />
-                            Облагается УСН 6%
-                          </label>
-                        ) : null}
-                      </div>
-
-                      <div style={{ ...ui.row, marginTop: 10 }}>
-                        <button style={ui.btnPrimary} onClick={() => saveEditTx(r)}>Сохранить</button>
-                        <button style={ui.btn} onClick={() => setEditingTxId('')}>Отмена</button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}
+                        <div style={{ ...ui.row, marginTop: 10 }}>
+                          <button style={ui.btnPrimary} onClick={saveEditTxLocal}>Сохранить</button>
+                          <button style={ui.btn} onClick={() => setEditingTxId('')}>Отмена</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )
+              })
+            )}
           </div>
         </section>
       </div>
